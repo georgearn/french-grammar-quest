@@ -2,9 +2,6 @@ package com.example.ui.training
 
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.BorderStroke
-import androidx.compose.foundation.background
-import androidx.compose.foundation.border
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -16,610 +13,375 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.automirrored.filled.ArrowForward
+import androidx.compose.material.icons.automirrored.filled.MenuBook
+import androidx.compose.material.icons.filled.Cancel
 import androidx.compose.material.icons.filled.CheckCircle
-import androidx.compose.material.icons.filled.Close
-import androidx.compose.material.icons.filled.Edit
-import androidx.compose.material.icons.filled.EmojiEvents
-import androidx.compose.material.icons.filled.FindInPage
-import androidx.compose.material.icons.filled.HelpOutline
 import androidx.compose.material.icons.filled.Lightbulb
 import androidx.compose.material.icons.filled.Refresh
-import androidx.compose.material.icons.filled.Visibility
+import androidx.compose.material.icons.filled.Replay
+import androidx.compose.material.icons.filled.WarningAmber
 import androidx.compose.material3.Button
-import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
-import androidx.compose.material3.FilterChip
-import androidx.compose.material3.FilterChipDefaults
+import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.OutlinedTextFieldDefaults
+import androidx.compose.material3.SegmentedButton
+import androidx.compose.material3.SegmentedButtonDefaults
+import androidx.compose.material3.SingleChoiceSegmentedButtonRow
 import androidx.compose.material3.Surface
-import androidx.compose.material3.Tab
-import androidx.compose.material3.TabRow
-import androidx.compose.material3.TabRowDefaults
-import androidx.compose.material3.TabRowDefaults.tabIndicatorOffset
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.stateDescription
+import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
-import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.input.KeyboardCapitalization
+import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
-import com.example.data.engine.GrammarRuleRepository
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.example.R
+import com.example.data.engine.AnswerVerdict
 import com.example.data.engine.ProductionDrillItem
 import com.example.data.engine.SpotErrorDrillItem
 import com.example.data.engine.StructuredRule
+import com.example.data.local.RuleTrainingProgressEntity
+import com.example.data.prefs.DrillMode
+import com.example.ui.DrillFeedback
+import com.example.ui.GrammarViewModel
+import com.example.ui.TrainingSession
+import com.example.ui.components.RulePickerSheet
+import com.example.ui.components.RuleSelectorField
+import com.example.ui.i18n.localized
 import com.example.ui.theme.AppThemeColors
 
-enum class DrillMode {
-  PRODUCTION,   // Saisie active / transformation (Primary drill type)
-  SPOT_ERROR    // Chasse à l'erreur en contexte (Secondary drill type)
-}
-
+/**
+ * "S'entraîner": one compact header (rule + drill type), then the exercise with its action button
+ * pinned at the bottom, above the keyboard. The whole session lives in the ViewModel, so switching
+ * tabs or rotating the phone never loses progress.
+ */
 @Composable
 fun TrainingPathScreen(
-  initialRuleId: String,
+  viewModel: GrammarViewModel,
   onExploreRule: (String) -> Unit,
-  onSessionComplete: (ruleId: String, isProductionMode: Boolean, score: Int, total: Int) -> Unit = { _, _, _, _ -> },
-  onOpenIndex: () -> Unit = {},
   modifier: Modifier = Modifier
 ) {
-  val allRules = remember { GrammarRuleRepository.getAllRules() }
-  var selectedRuleId by remember { mutableStateOf(initialRuleId) }
-  var drillMode by remember { mutableStateOf(DrillMode.PRODUCTION) }
+  val session by viewModel.training.collectAsStateWithLifecycle()
+  val levelFilter by viewModel.levelFilter.collectAsStateWithLifecycle()
+  val progressMap by viewModel.ruleTrainingProgressMap.collectAsStateWithLifecycle()
+  val rule = viewModel.ruleById(session.ruleId)
+  var showPicker by rememberSaveable { mutableStateOf(false) }
 
-  // Ensure valid rule
-  val currentRule = remember(selectedRuleId, allRules) {
-    GrammarRuleRepository.getRuleById(selectedRuleId) ?: allRules.firstOrNull() ?: allRules[0]
+  val itemId = session.itemIds.getOrNull(session.index)
+  val productionItem = if (session.mode == DrillMode.PRODUCTION) rule.productionDrills.firstOrNull { it.id == itemId } else null
+  val spotItem = if (session.mode == DrillMode.SPOT_ERROR) rule.spotErrorDrills.firstOrNull { it.id == itemId } else null
+
+  // Per-item input, reset for every new item and every new run.
+  val itemKey = "${session.sessionId}-$itemId"
+  var input by rememberSaveable(itemKey, stateSaver = TextFieldValue.Saver) { mutableStateOf(TextFieldValue("")) }
+  var selectedToken by rememberSaveable(itemKey) { mutableStateOf<Int?>(null) }
+
+  val submit: () -> Unit = {
+    when {
+      productionItem != null && input.text.isNotBlank() -> viewModel.submitProductionAnswer(input.text)
+      spotItem != null -> selectedToken?.let(viewModel::submitSpotError)
+    }
   }
-
-  // Session state
-  var currentQuestionIndex by remember(selectedRuleId, drillMode) { mutableIntStateOf(0) }
-  var scoreCount by remember(selectedRuleId, drillMode) { mutableIntStateOf(0) }
-  var isSessionFinished by remember(selectedRuleId, drillMode) { mutableStateOf(false) }
-
-  val scrollState = rememberScrollState()
 
   Column(
     modifier = modifier
       .fillMaxSize()
-      .background(MaterialTheme.colorScheme.background)
-      .verticalScroll(scrollState)
-      .padding(16.dp)
+      .imePadding()
       .testTag("training_screen")
   ) {
-    // Top Mode Switcher: Production vs Spot Error
-    TrainingModeTabHeader(
-      activeMode = drillMode,
-      onSelectMode = {
-        drillMode = it
-        currentQuestionIndex = 0
-        scoreCount = 0
-        isSessionFinished = false
-      },
-      onOpenIndex = onOpenIndex
-    )
-
-    Spacer(modifier = Modifier.height(16.dp))
-
-    // Free Topic Selector
-    FreeTopicSelector(
-      rules = allRules,
-      selectedRuleId = currentRule.id,
-      onSelectRule = {
-        selectedRuleId = it
-        currentQuestionIndex = 0
-        scoreCount = 0
-        isSessionFinished = false
-      }
-    )
-
-    Spacer(modifier = Modifier.height(20.dp))
-
-    if (isSessionFinished) {
-      // Session Complete View
-      val totalQuestions = if (drillMode == DrillMode.PRODUCTION) {
-        currentRule.productionDrills.size
-      } else {
-        currentRule.spotErrorDrills.size
-      }
-
-      TrainingFinishedCard(
-        score = scoreCount,
-        total = totalQuestions,
-        rule = currentRule,
-        onRestart = {
-          currentQuestionIndex = 0
-          scoreCount = 0
-          isSessionFinished = false
-        },
-        onExploreRule = { onExploreRule(currentRule.id) }
+    Column(
+      modifier = Modifier
+        .weight(1f)
+        .verticalScroll(rememberScrollState())
+        .padding(16.dp),
+      verticalArrangement = Arrangement.spacedBy(14.dp)
+    ) {
+      RuleSelectorField(
+        rule = rule,
+        supportingText = bestScoreText(progressMap[rule.id], session.mode),
+        onClick = { showPicker = true },
+        modifier = Modifier.fillMaxWidth()
       )
-    } else {
-      // Active Drill Rendering
-      if (drillMode == DrillMode.PRODUCTION) {
-        val drills = currentRule.productionDrills
-        val currentDrill = drills.getOrNull(currentQuestionIndex)
 
-        if (currentDrill != null) {
-          ActiveProductionDrillView(
-            drill = currentDrill,
-            currentIndex = currentQuestionIndex,
-            totalCount = drills.size,
-            onAnswerChecked = { isCorrect ->
-              if (isCorrect) scoreCount++
-            },
-            onNext = {
-              if (currentQuestionIndex + 1 < drills.size) {
-                currentQuestionIndex++
-              } else {
-                isSessionFinished = true
-                onSessionComplete(currentRule.id, true, scoreCount, drills.size)
-              }
-            }
-          )
-        } else {
-          NoDrillsAvailableCard(rule = currentRule)
-        }
-      } else {
-        // Spot-the-Error Mode
-        val drills = currentRule.spotErrorDrills
-        val currentDrill = drills.getOrNull(currentQuestionIndex)
+      DrillModeSelector(mode = session.mode, onSelect = viewModel::setDrillMode)
 
-        if (currentDrill != null) {
-          ActiveSpotErrorDrillView(
-            drill = currentDrill,
-            currentIndex = currentQuestionIndex,
-            totalCount = drills.size,
-            onAnswerChecked = { isCorrect ->
-              if (isCorrect) scoreCount++
-            },
-            onNext = {
-              if (currentQuestionIndex + 1 < drills.size) {
-                currentQuestionIndex++
-              } else {
-                isSessionFinished = true
-                onSessionComplete(currentRule.id, false, scoreCount, drills.size)
-              }
-            }
-          )
-        } else {
-          NoDrillsAvailableCard(rule = currentRule)
+      when {
+        session.itemIds.isEmpty() -> NoDrillsCard(
+          onSwitchMode = {
+            viewModel.setDrillMode(if (session.mode == DrillMode.PRODUCTION) DrillMode.SPOT_ERROR else DrillMode.PRODUCTION)
+          },
+          onPickRule = { showPicker = true }
+        )
+
+        session.isFinished -> SessionSummary(
+          session = session,
+          rule = rule,
+          onReviewMistakes = viewModel::reviewMistakes,
+          onRestart = viewModel::restartTraining,
+          onExploreRule = { onExploreRule(rule.id) },
+          onNextRule = viewModel.nextRuleId(rule.id)?.let { nextId -> { viewModel.selectTrainingRule(nextId) } }
+        )
+
+        else -> {
+          SessionProgress(session)
+          if (productionItem != null) {
+            ProductionDrill(
+              drill = productionItem,
+              input = input,
+              onInputChange = { if (session.feedback == null) input = it },
+              feedback = session.feedback,
+              onSubmit = submit
+            )
+          }
+          if (spotItem != null) {
+            SpotErrorDrill(
+              drill = spotItem,
+              selectedToken = selectedToken,
+              onSelectToken = { if (session.feedback == null) selectedToken = it },
+              feedback = session.feedback
+            )
+          }
         }
       }
     }
 
-    Spacer(modifier = Modifier.height(32.dp))
+    if (!session.isFinished && session.itemIds.isNotEmpty()) {
+      DrillActionBar(
+        session = session,
+        canSubmit = (productionItem != null && input.text.isNotBlank()) || (spotItem != null && selectedToken != null),
+        onSubmit = submit,
+        onNext = viewModel::nextDrill
+      )
+    }
+  }
+
+  if (showPicker) {
+    RulePickerSheet(
+      rules = viewModel.rules,
+      selectedRuleId = rule.id,
+      levelFilter = levelFilter,
+      onLevelFilterChange = viewModel::setLevelFilter,
+      onSelectRule = viewModel::selectTrainingRule,
+      onDismiss = { showPicker = false },
+      progressMap = progressMap
+    )
   }
 }
 
 @Composable
-private fun TrainingModeTabHeader(
-  activeMode: DrillMode,
-  onSelectMode: (DrillMode) -> Unit,
-  onOpenIndex: () -> Unit = {}
-) {
+private fun bestScoreText(progress: RuleTrainingProgressEntity?, mode: DrillMode): String {
+  val (score, total) = when (mode) {
+    DrillMode.PRODUCTION -> (progress?.bestProductionScore ?: 0) to (progress?.bestProductionTotal ?: 0)
+    DrillMode.SPOT_ERROR -> (progress?.bestSpotErrorScore ?: 0) to (progress?.bestSpotErrorTotal ?: 0)
+  }
+  return if (total > 0) stringResource(R.string.train_best_score, score, total)
+  else stringResource(R.string.train_not_trained)
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun DrillModeSelector(mode: DrillMode, onSelect: (DrillMode) -> Unit) {
+  val options = listOf(
+    DrillMode.PRODUCTION to R.string.drill_production,
+    DrillMode.SPOT_ERROR to R.string.drill_spot_error
+  )
+  SingleChoiceSegmentedButtonRow(modifier = Modifier.fillMaxWidth()) {
+    options.forEachIndexed { index, (option, label) ->
+      SegmentedButton(
+        selected = mode == option,
+        onClick = { onSelect(option) },
+        shape = SegmentedButtonDefaults.itemShape(index, options.size)
+      ) { Text(stringResource(label)) }
+    }
+  }
+}
+
+@Composable
+private fun SessionProgress(session: TrainingSession) {
+  val done = session.index + if (session.feedback != null) 1 else 0
+  Column {
+    Row(verticalAlignment = Alignment.CenterVertically) {
+      Text(
+        text = stringResource(R.string.train_item_position, session.index + 1, session.itemIds.size),
+        style = MaterialTheme.typography.labelLarge,
+        fontWeight = FontWeight.Bold,
+        modifier = Modifier.weight(1f)
+      )
+      if (session.isReview) {
+        Surface(shape = RoundedCornerShape(8.dp), color = AppThemeColors.goldContainer) {
+          Text(
+            stringResource(R.string.train_review_badge),
+            style = MaterialTheme.typography.labelMedium,
+            color = AppThemeColors.onGoldContainer,
+            modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp)
+          )
+        }
+        Spacer(Modifier.width(8.dp))
+      }
+      Text(
+        text = stringResource(R.string.train_score_so_far, session.score),
+        style = MaterialTheme.typography.labelLarge,
+        color = MaterialTheme.colorScheme.onSurfaceVariant
+      )
+    }
+    Spacer(Modifier.height(6.dp))
+    LinearProgressIndicator(
+      progress = { done.toFloat() / session.itemIds.size.coerceAtLeast(1) },
+      modifier = Modifier.fillMaxWidth()
+    )
+  }
+}
+
+@Composable
+private fun DrillCard(content: @Composable () -> Unit) {
   Card(
     modifier = Modifier.fillMaxWidth(),
     shape = RoundedCornerShape(16.dp),
     colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
     border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)
   ) {
-    Column(modifier = Modifier.padding(14.dp)) {
-      Row(
-        modifier = Modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.SpaceBetween,
-        verticalAlignment = Alignment.CenterVertically
-      ) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-          Icon(
-            imageVector = Icons.Default.Edit,
-            contentDescription = null,
-            tint = AppThemeColors.primary,
-            modifier = Modifier.size(20.dp)
-          )
-          Spacer(modifier = Modifier.width(8.dp))
-          Text(
-            text = "Entraînement : Production & Détection",
-            style = MaterialTheme.typography.titleMedium,
-            fontWeight = FontWeight.Bold
-          )
-        }
-
-        IconButton(onClick = onOpenIndex, modifier = Modifier.testTag("training_open_index")) {
-          Icon(
-            imageVector = Icons.Default.FindInPage,
-            contentDescription = "Parcourir toutes les règles (Codex)",
-            tint = AppThemeColors.primary
-          )
-        }
-      }
-
-      Spacer(modifier = Modifier.height(4.dp))
-
-      Text(
-        text = "Choisissez librement votre mode d'exercice pour intérioriser la règle :",
-        style = MaterialTheme.typography.bodySmall,
-        color = MaterialTheme.colorScheme.onSurfaceVariant
-      )
-
-      Spacer(modifier = Modifier.height(12.dp))
-
-      TabRow(
-        selectedTabIndex = if (activeMode == DrillMode.PRODUCTION) 0 else 1,
-        containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
-        contentColor = AppThemeColors.primary,
-        indicator = { tabPositions ->
-          TabRowDefaults.SecondaryIndicator(
-            Modifier.tabIndicatorOffset(tabPositions[if (activeMode == DrillMode.PRODUCTION) 0 else 1]),
-            color = AppThemeColors.primary
-          )
-        }
-      ) {
-        Tab(
-          selected = activeMode == DrillMode.PRODUCTION,
-          onClick = { onSelectMode(DrillMode.PRODUCTION) },
-          text = {
-            Text(
-              text = "✍️ Saisie Active (Production)",
-              fontWeight = if (activeMode == DrillMode.PRODUCTION) FontWeight.Bold else FontWeight.Medium,
-              fontSize = 13.5.sp
-            )
-          }
-        )
-        Tab(
-          selected = activeMode == DrillMode.SPOT_ERROR,
-          onClick = { onSelectMode(DrillMode.SPOT_ERROR) },
-          text = {
-            Text(
-              text = "🔍 Chasse à l'Erreur",
-              fontWeight = if (activeMode == DrillMode.SPOT_ERROR) FontWeight.Bold else FontWeight.Medium,
-              fontSize = 13.5.sp
-            )
-          }
-        )
-      }
-    }
+    Column(modifier = Modifier.padding(18.dp)) { content() }
   }
 }
 
 @Composable
-private fun FreeTopicSelector(
-  rules: List<StructuredRule>,
-  selectedRuleId: String,
-  onSelectRule: (String) -> Unit
+private fun ProductionDrill(
+  drill: ProductionDrillItem,
+  input: TextFieldValue,
+  onInputChange: (TextFieldValue) -> Unit,
+  feedback: DrillFeedback?,
+  onSubmit: () -> Unit
 ) {
-  val scrollState = rememberScrollState()
+  var showHint by rememberSaveable(drill.id) { mutableStateOf(false) }
+  val submitted = feedback != null
 
-  Column {
+  DrillCard {
     Text(
-      text = "Sélection libre de la règle à travailler :",
-      style = MaterialTheme.typography.labelMedium,
-      fontWeight = FontWeight.Bold,
+      text = localized(drill.instructionFr, drill.instructionEn),
+      style = MaterialTheme.typography.bodyMedium,
       color = MaterialTheme.colorScheme.onSurfaceVariant
     )
+    Spacer(Modifier.height(10.dp))
+    Text(
+      text = drill.basePrompt,
+      style = MaterialTheme.typography.titleLarge,
+      fontWeight = FontWeight.Bold
+    )
 
-    Spacer(modifier = Modifier.height(6.dp))
+    if (!submitted) {
+      TextButton(onClick = { showHint = !showHint }, modifier = Modifier.padding(top = 4.dp)) {
+        Icon(Icons.Default.Lightbulb, contentDescription = null, modifier = Modifier.size(18.dp))
+        Spacer(Modifier.width(6.dp))
+        Text(stringResource(if (showHint) R.string.train_hide_hint else R.string.train_show_hint))
+      }
+      AnimatedVisibility(visible = showHint) {
+        Surface(shape = RoundedCornerShape(10.dp), color = AppThemeColors.goldContainer) {
+          Text(
+            text = drill.hint,
+            style = MaterialTheme.typography.bodyMedium,
+            color = AppThemeColors.onGoldContainer,
+            modifier = Modifier.padding(12.dp)
+          )
+        }
+      }
+    }
 
-    Row(
+    Spacer(Modifier.height(12.dp))
+
+    OutlinedTextField(
+      value = input,
+      onValueChange = onInputChange,
+      label = { Text(stringResource(R.string.train_answer_label)) },
+      singleLine = true,
+      enabled = !submitted,
+      keyboardOptions = KeyboardOptions(
+        capitalization = KeyboardCapitalization.None,
+        autoCorrectEnabled = false,
+        imeAction = ImeAction.Done
+      ),
+      keyboardActions = KeyboardActions(onDone = { onSubmit() }),
       modifier = Modifier
         .fillMaxWidth()
-        .horizontalScroll(scrollState),
-      horizontalArrangement = Arrangement.spacedBy(8.dp)
-    ) {
-      rules.forEach { rule ->
-        val isSelected = rule.id == selectedRuleId
-        FilterChip(
-          selected = isSelected,
-          onClick = { onSelectRule(rule.id) },
-          label = {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-              Text(
-                text = rule.level,
-                fontWeight = FontWeight.Bold,
-                fontSize = 10.5.sp,
-                color = if (isSelected) Color.White else AppThemeColors.primary,
-                modifier = Modifier
-                  .clip(RoundedCornerShape(4.dp))
-                  .background(if (isSelected) Color.White.copy(alpha = 0.2f) else AppThemeColors.primaryContainer)
-                  .padding(horizontal = 4.dp, vertical = 1.dp)
-              )
-              Spacer(modifier = Modifier.width(6.dp))
-              Text(
-                text = rule.titleFr.split(":").firstOrNull()?.trim() ?: rule.titleFr,
-                fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal,
-                fontSize = 12.5.sp
-              )
-            }
-          },
-          colors = FilterChipDefaults.filterChipColors(
-            selectedContainerColor = AppThemeColors.primary,
-            selectedLabelColor = Color.White
-          )
-        )
-      }
+        .testTag("production_input_field"),
+      shape = RoundedCornerShape(12.dp)
+    )
+
+    if (!submitted) {
+      Spacer(Modifier.height(8.dp))
+      FrenchAccentToolbar(onInsert = { char -> onInputChange(input.insertAtCursor(char)) })
+    }
+
+    if (feedback != null) {
+      Spacer(Modifier.height(14.dp))
+      ProductionFeedback(feedback = feedback, expected = drill.targetAnswer, explanation = drill.explanation)
     }
   }
 }
 
-@Composable
-private fun ActiveProductionDrillView(
-  drill: ProductionDrillItem,
-  currentIndex: Int,
-  totalCount: Int,
-  onAnswerChecked: (Boolean) -> Unit,
-  onNext: () -> Unit
-) {
-  var typedAnswer by remember(drill.id) { mutableStateOf("") }
-  var isSubmitted by remember(drill.id) { mutableStateOf(false) }
-  var isCorrect by remember(drill.id) { mutableStateOf(false) }
-  var showHint by remember(drill.id) { mutableStateOf(false) }
-
-  Card(
-    modifier = Modifier.fillMaxWidth(),
-    shape = RoundedCornerShape(16.dp),
-    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-    elevation = CardDefaults.cardElevation(defaultElevation = 2.dp),
-    border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)
-  ) {
-    Column(modifier = Modifier.padding(18.dp)) {
-      // Step counter
-      Row(
-        modifier = Modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.SpaceBetween,
-        verticalAlignment = Alignment.CenterVertically
-      ) {
-        Surface(
-          shape = RoundedCornerShape(20.dp),
-          color = AppThemeColors.primaryContainer
-        ) {
-          Text(
-            text = "Exercice ${currentIndex + 1} / $totalCount",
-            fontSize = 11.5.sp,
-            fontWeight = FontWeight.Bold,
-            color = AppThemeColors.onPrimaryContainer,
-            modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp)
-          )
-        }
-
-        // Hint toggle button
-        OutlinedButton(
-          onClick = { showHint = !showHint },
-          shape = RoundedCornerShape(20.dp),
-          contentPadding = ButtonDefaults.ContentPadding
-        ) {
-          Icon(Icons.Default.HelpOutline, contentDescription = null, modifier = Modifier.size(16.dp))
-          Spacer(modifier = Modifier.width(4.dp))
-          Text(text = if (showHint) "Masquer l'indice" else "Indice", fontSize = 12.5.sp)
-        }
-      }
-
-      Spacer(modifier = Modifier.height(14.dp))
-
-      // Instruction
-      Text(
-        text = drill.instructionFr,
-        style = MaterialTheme.typography.titleMedium,
-        fontWeight = FontWeight.Bold,
-        color = MaterialTheme.colorScheme.onSurface
-      )
-
-      Text(
-        text = drill.instructionEn,
-        style = MaterialTheme.typography.bodySmall,
-        color = MaterialTheme.colorScheme.onSurfaceVariant
-      )
-
-      Spacer(modifier = Modifier.height(16.dp))
-
-      // Base Prompt Sentence Box
-      Surface(
-        shape = RoundedCornerShape(12.dp),
-        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
-        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
-        modifier = Modifier.fillMaxWidth()
-      ) {
-        Text(
-          text = drill.basePrompt,
-          style = MaterialTheme.typography.bodyLarge,
-          fontWeight = FontWeight.SemiBold,
-          lineHeight = 24.sp,
-          modifier = Modifier.padding(16.dp),
-          color = MaterialTheme.colorScheme.onSurface
-        )
-      }
-
-      // Optional Hint display
-      AnimatedVisibility(visible = showHint) {
-        Surface(
-          shape = RoundedCornerShape(10.dp),
-          color = AppThemeColors.goldContainer,
-          modifier = Modifier
-            .fillMaxWidth()
-            .padding(top = 10.dp)
-        ) {
-          Row(
-            modifier = Modifier.padding(12.dp),
-            verticalAlignment = Alignment.CenterVertically
-          ) {
-            Icon(
-              imageVector = Icons.Default.Lightbulb,
-              contentDescription = null,
-              tint = AppThemeColors.onGoldContainer,
-              modifier = Modifier.size(18.dp)
-            )
-            Spacer(modifier = Modifier.width(8.dp))
-            Text(
-              text = drill.hint,
-              fontSize = 12.5.sp,
-              color = AppThemeColors.onGoldContainer
-            )
-          }
-        }
-      }
-
-      Spacer(modifier = Modifier.height(16.dp))
-
-      // Text Input Field
-      OutlinedTextField(
-        value = typedAnswer,
-        onValueChange = { if (!isSubmitted) typedAnswer = it },
-        label = { Text("Tapez votre réponse ici (conjugaison / transformation)") },
-        placeholder = { Text("ex : ${drill.targetAnswer}") },
-        singleLine = true,
-        enabled = !isSubmitted,
-        modifier = Modifier
-          .fillMaxWidth()
-          .testTag("production_input_field"),
-        shape = RoundedCornerShape(12.dp),
-        colors = OutlinedTextFieldDefaults.colors(
-          focusedBorderColor = AppThemeColors.primary,
-          unfocusedBorderColor = MaterialTheme.colorScheme.outline,
-          focusedTextColor = MaterialTheme.colorScheme.onSurface,
-          unfocusedTextColor = MaterialTheme.colorScheme.onSurface,
-          disabledTextColor = MaterialTheme.colorScheme.onSurface,
-          cursorColor = AppThemeColors.primary,
-          focusedPlaceholderColor = MaterialTheme.colorScheme.onSurfaceVariant,
-          unfocusedPlaceholderColor = MaterialTheme.colorScheme.onSurfaceVariant,
-          focusedLabelColor = AppThemeColors.primary,
-          unfocusedLabelColor = MaterialTheme.colorScheme.onSurfaceVariant
-        ),
-        keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
-        keyboardActions = KeyboardActions(
-          onDone = {
-            if (!isSubmitted && typedAnswer.isNotBlank()) {
-              val cleanInput = typedAnswer.trim().lowercase()
-              val cleanTarget = drill.targetAnswer.trim().lowercase()
-              val isOk = cleanInput == cleanTarget || drill.acceptedAnswers.any { it.trim().lowercase() == cleanInput }
-              isCorrect = isOk
-              isSubmitted = true
-              onAnswerChecked(isOk)
-            }
-          }
-        )
-      )
-
-      Spacer(modifier = Modifier.height(8.dp))
-
-      // French Accent Quick-Keys Toolbar
-      if (!isSubmitted) {
-        FrenchAccentToolbar(
-          onInsertChar = { charToInsert ->
-            typedAnswer += charToInsert
-          }
-        )
-      }
-
-      Spacer(modifier = Modifier.height(16.dp))
-
-      // Action Button: Verify or Next
-      if (!isSubmitted) {
-        Button(
-          onClick = {
-            val cleanInput = typedAnswer.trim().lowercase()
-            val cleanTarget = drill.targetAnswer.trim().lowercase()
-            val isOk = cleanInput == cleanTarget || drill.acceptedAnswers.any { it.trim().lowercase() == cleanInput }
-            isCorrect = isOk
-            isSubmitted = true
-            onAnswerChecked(isOk)
-          },
-          enabled = typedAnswer.isNotBlank(),
-          modifier = Modifier
-            .fillMaxWidth()
-            .height(52.dp)
-            .testTag("verify_answer_btn"),
-          colors = ButtonDefaults.buttonColors(containerColor = AppThemeColors.primary),
-          shape = RoundedCornerShape(12.dp)
-        ) {
-          Text("Vérifier la réponse", fontWeight = FontWeight.Bold, fontSize = 15.5.sp)
-        }
-      } else {
-        // Result Feedback with Smart Diff
-        ProductionFeedbackCard(
-          isCorrect = isCorrect,
-          typedAnswer = typedAnswer,
-          targetAnswer = drill.targetAnswer,
-          explanation = drill.explanation
-        )
-
-        Spacer(modifier = Modifier.height(16.dp))
-
-        Button(
-          onClick = onNext,
-          modifier = Modifier
-            .fillMaxWidth()
-            .height(52.dp)
-            .testTag("next_question_btn"),
-          colors = ButtonDefaults.buttonColors(
-            containerColor = if (isCorrect) AppThemeColors.success else AppThemeColors.primary
-          ),
-          shape = RoundedCornerShape(12.dp)
-        ) {
-          Text(
-            text = if (currentIndex + 1 < totalCount) "Question suivante" else "Voir le bilan",
-            fontWeight = FontWeight.Bold,
-            fontSize = 15.5.sp
-          )
-        }
-      }
-    }
-  }
+/** Inserts [text] at the cursor (replacing any selection) instead of appending at the end. */
+private fun TextFieldValue.insertAtCursor(text: String): TextFieldValue {
+  val start = selection.min
+  val end = selection.max
+  val newText = this.text.replaceRange(start, end, text)
+  return copy(text = newText, selection = TextRange(start + text.length))
 }
 
-@Composable
-private fun FrenchAccentToolbar(onInsertChar: (String) -> Unit) {
-  val accents = listOf("é", "è", "ê", "à", "â", "ç", "ù", "î", "ô", "œ", "«", "»")
-  val scrollState = rememberScrollState()
+private val FRENCH_ACCENTS = listOf("é", "è", "ê", "ë", "à", "â", "ç", "î", "ï", "ô", "ù", "û", "œ", "’")
 
+@Composable
+private fun FrenchAccentToolbar(onInsert: (String) -> Unit) {
   Row(
     modifier = Modifier
       .fillMaxWidth()
-      .horizontalScroll(scrollState),
+      .horizontalScroll(rememberScrollState()),
     horizontalArrangement = Arrangement.spacedBy(6.dp)
   ) {
-    accents.forEach { char ->
+    FRENCH_ACCENTS.forEach { char ->
       Surface(
-        onClick = { onInsertChar(char) },
-        shape = RoundedCornerShape(8.dp),
+        onClick = { onInsert(char) },
+        shape = RoundedCornerShape(10.dp),
         color = MaterialTheme.colorScheme.surfaceVariant,
-        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
-        modifier = Modifier.size(38.dp)
+        modifier = Modifier
+          .size(48.dp)
+          .semantics { contentDescription = char }
       ) {
-        Box(contentAlignment = Alignment.Center) {
-          Text(
-            text = char,
-            fontSize = 16.5.sp,
-            fontWeight = FontWeight.Bold,
-            color = MaterialTheme.colorScheme.onSurface
-          )
+        Box(contentAlignment = Alignment.Center, modifier = Modifier.fillMaxSize()) {
+          Text(char, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
         }
       }
     }
@@ -627,263 +389,197 @@ private fun FrenchAccentToolbar(onInsertChar: (String) -> Unit) {
 }
 
 @Composable
-private fun ProductionFeedbackCard(
-  isCorrect: Boolean,
-  typedAnswer: String,
-  targetAnswer: String,
-  explanation: String
-) {
-  Surface(
-    shape = RoundedCornerShape(12.dp),
-    color = if (isCorrect) AppThemeColors.successContainer else AppThemeColors.redContainer,
-    border = BorderStroke(1.5.dp, if (isCorrect) AppThemeColors.success else AppThemeColors.red),
-    modifier = Modifier.fillMaxWidth()
-  ) {
-    Column(modifier = Modifier.padding(14.dp)) {
+private fun ProductionFeedback(feedback: DrillFeedback, expected: String, explanation: String) {
+  val (icon, title, container, onContainer) = verdictStyle(feedback.verdict)
+  Surface(shape = RoundedCornerShape(12.dp), color = container, border = BorderStroke(1.dp, onContainer.copy(alpha = 0.4f))) {
+    Column(modifier = Modifier.padding(14.dp).fillMaxWidth()) {
       Row(verticalAlignment = Alignment.CenterVertically) {
-        Icon(
-          imageVector = if (isCorrect) Icons.Default.CheckCircle else Icons.Default.Close,
-          contentDescription = null,
-          tint = if (isCorrect) AppThemeColors.onSuccessContainer else AppThemeColors.onRedContainer,
-          modifier = Modifier.size(22.dp)
-        )
-        Spacer(modifier = Modifier.width(8.dp))
-        Text(
-          text = if (isCorrect) "Excellent ! Réponse exacte." else "Analyse de votre saisie :",
-          style = MaterialTheme.typography.titleSmall,
-          fontWeight = FontWeight.Bold,
-          color = if (isCorrect) AppThemeColors.onSuccessContainer else AppThemeColors.onRedContainer
-        )
+        Icon(icon, contentDescription = null, tint = onContainer)
+        Spacer(Modifier.width(8.dp))
+        Text(title, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold, color = onContainer)
       }
-
-      Spacer(modifier = Modifier.height(8.dp))
-
-      if (!isCorrect) {
-        Row {
-          Text(text = "Votre saisie : ", style = MaterialTheme.typography.bodySmall, fontWeight = FontWeight.Bold)
-          Text(text = typedAnswer, style = MaterialTheme.typography.bodySmall, fontFamily = FontFamily.Monospace)
-        }
-        Spacer(modifier = Modifier.height(4.dp))
-        Row {
-          Text(text = "Attendu : ", style = MaterialTheme.typography.bodySmall, fontWeight = FontWeight.Bold)
-          Text(
-            text = targetAnswer,
-            style = MaterialTheme.typography.bodySmall,
-            fontWeight = FontWeight.Bold,
-            fontFamily = FontFamily.Monospace,
-            color = AppThemeColors.onRedContainer
-          )
-        }
-        Spacer(modifier = Modifier.height(10.dp))
+      if (feedback.verdict != AnswerVerdict.CORRECT) {
+        Spacer(Modifier.height(8.dp))
+        LabeledValue(stringResource(R.string.train_your_answer), feedback.given, onContainer)
+        LabeledValue(stringResource(R.string.train_expected), expected, onContainer)
       }
-
-      HorizontalDivider(color = (if (isCorrect) AppThemeColors.success else AppThemeColors.red).copy(alpha = 0.3f))
-      Spacer(modifier = Modifier.height(8.dp))
-
-      Text(
-        text = "Explication : $explanation",
-        style = MaterialTheme.typography.bodySmall,
-        color = if (isCorrect) AppThemeColors.onSuccessContainer else AppThemeColors.onRedContainer,
-        lineHeight = 18.sp
-      )
+      Spacer(Modifier.height(8.dp))
+      Text(explanation, style = MaterialTheme.typography.bodyMedium, color = onContainer)
     }
   }
+}
+
+@Composable
+private fun LabeledValue(label: String, value: String, color: Color) {
+  Row {
+    Text("$label ", style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Bold, color = color)
+    Text(value, style = MaterialTheme.typography.bodyMedium, fontFamily = FontFamily.Monospace, color = color)
+  }
+}
+
+private data class VerdictStyle(val icon: ImageVector, val title: String, val container: Color, val onContainer: Color)
+
+@Composable
+private fun verdictStyle(verdict: AnswerVerdict): VerdictStyle = when (verdict) {
+  AnswerVerdict.CORRECT -> VerdictStyle(
+    Icons.Default.CheckCircle, stringResource(R.string.train_correct),
+    AppThemeColors.successContainer, AppThemeColors.onSuccessContainer
+  )
+  AnswerVerdict.ACCENT_MISTAKE -> VerdictStyle(
+    Icons.Default.WarningAmber, stringResource(R.string.train_accent_mistake),
+    AppThemeColors.goldContainer, AppThemeColors.onGoldContainer
+  )
+  AnswerVerdict.WRONG -> VerdictStyle(
+    Icons.Default.Cancel, stringResource(R.string.train_wrong),
+    AppThemeColors.redContainer, AppThemeColors.onRedContainer
+  )
 }
 
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
-private fun ActiveSpotErrorDrillView(
+private fun SpotErrorDrill(
   drill: SpotErrorDrillItem,
-  currentIndex: Int,
-  totalCount: Int,
-  onAnswerChecked: (Boolean) -> Unit,
-  onNext: () -> Unit
+  selectedToken: Int?,
+  onSelectToken: (Int?) -> Unit,
+  feedback: DrillFeedback?
 ) {
-  var selectedTokenIdx by remember(drill.id) { mutableStateOf<Int?>(null) }
-  var isSubmitted by remember(drill.id) { mutableStateOf(false) }
-  var isCorrect by remember(drill.id) { mutableStateOf(false) }
+  val submitted = feedback != null
+  val correctLabel = stringResource(R.string.train_token_error)
+  val wrongLabel = stringResource(R.string.train_token_your_pick)
 
-  Card(
-    modifier = Modifier.fillMaxWidth(),
-    shape = RoundedCornerShape(16.dp),
-    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-    elevation = CardDefaults.cardElevation(defaultElevation = 2.dp),
-    border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)
-  ) {
-    Column(modifier = Modifier.padding(18.dp)) {
-      Row(
-        modifier = Modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.SpaceBetween,
-        verticalAlignment = Alignment.CenterVertically
-      ) {
+  DrillCard {
+    Text(
+      text = drill.instructionFr,
+      style = MaterialTheme.typography.bodyMedium,
+      color = MaterialTheme.colorScheme.onSurfaceVariant
+    )
+    Spacer(Modifier.height(4.dp))
+    Text(
+      text = stringResource(R.string.train_spot_hint),
+      style = MaterialTheme.typography.labelLarge,
+      fontWeight = FontWeight.Bold
+    )
+    Spacer(Modifier.height(12.dp))
+
+    FlowRow(
+      modifier = Modifier.fillMaxWidth(),
+      horizontalArrangement = Arrangement.spacedBy(6.dp),
+      verticalArrangement = Arrangement.spacedBy(6.dp)
+    ) {
+      drill.tokens.forEachIndexed { index, token ->
+        val isSelected = selectedToken == index
+        val isErrorTarget = index == drill.errorTokenIndex
+        val showAsError = submitted && isErrorTarget
+        val showAsWrongPick = submitted && isSelected && !isErrorTarget
+
+        val container = when {
+          showAsError -> AppThemeColors.successContainer
+          showAsWrongPick -> AppThemeColors.redContainer
+          isSelected -> AppThemeColors.primaryContainer
+          else -> MaterialTheme.colorScheme.surface
+        }
+        val border = when {
+          showAsError -> AppThemeColors.success
+          showAsWrongPick -> AppThemeColors.red
+          isSelected -> AppThemeColors.primary
+          else -> MaterialTheme.colorScheme.outline
+        }
+
         Surface(
-          shape = RoundedCornerShape(20.dp),
-          color = AppThemeColors.primaryContainer
-        ) {
-          Text(
-            text = "Détection ${currentIndex + 1} / $totalCount",
-            fontSize = 11.5.sp,
-            fontWeight = FontWeight.Bold,
-            color = AppThemeColors.onPrimaryContainer,
-            modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp)
-          )
-        }
-
-        Row(verticalAlignment = Alignment.CenterVertically) {
-          Icon(Icons.Default.FindInPage, contentDescription = null, tint = AppThemeColors.primary, modifier = Modifier.size(16.dp))
-          Spacer(modifier = Modifier.width(4.dp))
-          Text("Chasse à l'erreur", fontSize = 12.5.sp, color = AppThemeColors.primary, fontWeight = FontWeight.Bold)
-        }
-      }
-
-      Spacer(modifier = Modifier.height(14.dp))
-
-      Text(
-        text = drill.instructionFr,
-        style = MaterialTheme.typography.titleMedium,
-        fontWeight = FontWeight.Bold
-      )
-
-      Text(
-        text = "Touchez le mot ou groupe de mots qui enfreint la règle de grammaire :",
-        style = MaterialTheme.typography.bodySmall,
-        color = MaterialTheme.colorScheme.onSurfaceVariant
-      )
-
-      Spacer(modifier = Modifier.height(16.dp))
-
-      // Clickable Word Tokens Flow
-      FlowRow(
-        modifier = Modifier
-          .fillMaxWidth()
-          .clip(RoundedCornerShape(12.dp))
-          .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f))
-          .border(1.dp, MaterialTheme.colorScheme.outlineVariant, RoundedCornerShape(12.dp))
-          .padding(14.dp),
-        horizontalArrangement = Arrangement.spacedBy(6.dp),
-        verticalArrangement = Arrangement.spacedBy(8.dp)
-      ) {
-        drill.tokens.forEachIndexed { index, token ->
-          val isSelected = selectedTokenIdx == index
-          val isErrorTarget = index == drill.errorTokenIndex
-
-          val tokenColor = when {
-            isSubmitted && isErrorTarget -> AppThemeColors.successContainer
-            isSubmitted && isSelected && !isErrorTarget -> AppThemeColors.redContainer
-            isSelected -> AppThemeColors.primaryContainer
-            else -> MaterialTheme.colorScheme.surface
-          }
-
-          val tokenBorder = when {
-            isSubmitted && isErrorTarget -> AppThemeColors.success
-            isSubmitted && isSelected && !isErrorTarget -> AppThemeColors.red
-            isSelected -> AppThemeColors.primary
-            else -> MaterialTheme.colorScheme.outlineVariant
-          }
-
-          Surface(
-            onClick = {
-              if (!isSubmitted) {
-                selectedTokenIdx = if (isSelected) null else index
+          onClick = { onSelectToken(if (isSelected) null else index) },
+          enabled = !submitted,
+          shape = RoundedCornerShape(10.dp),
+          color = container,
+          border = BorderStroke(if (isSelected || showAsError) 2.dp else 1.dp, border),
+          modifier = Modifier
+            .heightIn(min = 48.dp)
+            .semantics {
+              when {
+                showAsError -> stateDescription = correctLabel
+                showAsWrongPick -> stateDescription = wrongLabel
               }
-            },
-            shape = RoundedCornerShape(8.dp),
-            color = tokenColor,
-            border = BorderStroke(1.dp, tokenBorder),
-            modifier = Modifier.padding(vertical = 2.dp)
+            }
+        ) {
+          Row(
+            modifier = Modifier.padding(horizontal = 12.dp, vertical = 12.dp),
+            verticalAlignment = Alignment.CenterVertically
           ) {
+            if (showAsError) {
+              Icon(Icons.Default.CheckCircle, contentDescription = null, tint = AppThemeColors.success, modifier = Modifier.size(16.dp))
+              Spacer(Modifier.width(4.dp))
+            } else if (showAsWrongPick) {
+              Icon(Icons.Default.Cancel, contentDescription = null, tint = AppThemeColors.red, modifier = Modifier.size(16.dp))
+              Spacer(Modifier.width(4.dp))
+            }
             Text(
               text = token,
-              fontSize = 15.5.sp,
-              fontWeight = if (isSelected || (isSubmitted && isErrorTarget)) FontWeight.Bold else FontWeight.Normal,
-              color = MaterialTheme.colorScheme.onSurface,
-              modifier = Modifier.padding(horizontal = 8.dp, vertical = 6.dp)
+              style = MaterialTheme.typography.bodyLarge,
+              fontWeight = if (isSelected || showAsError) FontWeight.Bold else FontWeight.Normal
             )
           }
         }
       }
+    }
 
-      Spacer(modifier = Modifier.height(20.dp))
+    if (feedback != null) {
+      Spacer(Modifier.height(14.dp))
+      val (icon, title, container, onContainer) = verdictStyle(feedback.verdict)
+      Surface(shape = RoundedCornerShape(12.dp), color = container) {
+        Column(modifier = Modifier.padding(14.dp).fillMaxWidth()) {
+          Row(verticalAlignment = Alignment.CenterVertically) {
+            Icon(icon, contentDescription = null, tint = onContainer)
+            Spacer(Modifier.width(8.dp))
+            Text(title, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold, color = onContainer)
+          }
+          Spacer(Modifier.height(8.dp))
+          Text(
+            stringResource(R.string.train_spot_correction, drill.errorWord, drill.correction),
+            style = MaterialTheme.typography.bodyMedium,
+            fontWeight = FontWeight.Bold,
+            color = onContainer
+          )
+          Spacer(Modifier.height(4.dp))
+          Text(drill.ruleExplanation, style = MaterialTheme.typography.bodyMedium, color = onContainer)
+        }
+      }
+    }
+  }
+}
 
-      if (!isSubmitted) {
+@Composable
+private fun DrillActionBar(
+  session: TrainingSession,
+  canSubmit: Boolean,
+  onSubmit: () -> Unit,
+  onNext: () -> Unit
+) {
+  Surface(tonalElevation = 3.dp, shadowElevation = 6.dp) {
+    Row(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 10.dp)) {
+      if (session.feedback == null) {
         Button(
-          onClick = {
-            val isOk = selectedTokenIdx == drill.errorTokenIndex
-            isCorrect = isOk
-            isSubmitted = true
-            onAnswerChecked(isOk)
-          },
-          enabled = selectedTokenIdx != null,
+          onClick = onSubmit,
+          enabled = canSubmit,
           modifier = Modifier
             .fillMaxWidth()
-            .height(52.dp),
-          colors = ButtonDefaults.buttonColors(containerColor = AppThemeColors.primary),
-          shape = RoundedCornerShape(12.dp)
+            .heightIn(min = 52.dp)
+            .testTag("verify_answer_btn"),
+          shape = RoundedCornerShape(14.dp)
         ) {
-          Text("Valider la détection", fontWeight = FontWeight.Bold, fontSize = 15.5.sp)
+          Text(stringResource(R.string.train_check), fontWeight = FontWeight.Bold)
         }
       } else {
-        // Result Feedback for Spot the Error
-        Surface(
-          shape = RoundedCornerShape(12.dp),
-          color = if (isCorrect) AppThemeColors.successContainer else AppThemeColors.redContainer,
-          border = BorderStroke(1.5.dp, if (isCorrect) AppThemeColors.success else AppThemeColors.red),
-          modifier = Modifier.fillMaxWidth()
-        ) {
-          Column(modifier = Modifier.padding(14.dp)) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-              Icon(
-                imageVector = if (isCorrect) Icons.Default.CheckCircle else Icons.Default.Close,
-                contentDescription = null,
-                tint = if (isCorrect) AppThemeColors.onSuccessContainer else AppThemeColors.onRedContainer,
-                modifier = Modifier.size(20.dp)
-              )
-              Spacer(modifier = Modifier.width(8.dp))
-              Text(
-                text = if (isCorrect) "Erreur bien identifiée !" else "Erreur manquée !",
-                style = MaterialTheme.typography.titleSmall,
-                fontWeight = FontWeight.Bold,
-                color = if (isCorrect) AppThemeColors.onSuccessContainer else AppThemeColors.onRedContainer
-              )
-            }
-
-            Spacer(modifier = Modifier.height(6.dp))
-
-            Text(
-              text = "Mot erroné : « ${drill.errorWord} »  ->  Correction : « ${drill.correction} »",
-              fontWeight = FontWeight.Bold,
-              style = MaterialTheme.typography.bodyMedium,
-              color = if (isCorrect) AppThemeColors.onSuccessContainer else AppThemeColors.onRedContainer
-            )
-
-            Spacer(modifier = Modifier.height(8.dp))
-
-            Text(
-              text = drill.ruleExplanation,
-              style = MaterialTheme.typography.bodySmall,
-              color = if (isCorrect) AppThemeColors.onSuccessContainer else AppThemeColors.onRedContainer,
-              lineHeight = 18.sp
-            )
-          }
-        }
-
-        Spacer(modifier = Modifier.height(16.dp))
-
+        val isLast = session.index + 1 >= session.itemIds.size
         Button(
           onClick = onNext,
           modifier = Modifier
             .fillMaxWidth()
-            .height(52.dp),
-          colors = ButtonDefaults.buttonColors(
-            containerColor = if (isCorrect) AppThemeColors.success else AppThemeColors.primary
-          ),
-          shape = RoundedCornerShape(12.dp)
+            .heightIn(min = 52.dp)
+            .testTag("next_question_btn"),
+          shape = RoundedCornerShape(14.dp)
         ) {
-          Text(
-            text = if (currentIndex + 1 < totalCount) "Exercice suivant" else "Voir le bilan",
-            fontWeight = FontWeight.Bold,
-            fontSize = 15.5.sp
-          )
+          Text(stringResource(if (isLast) R.string.train_see_summary else R.string.train_next), fontWeight = FontWeight.Bold)
+          Spacer(Modifier.width(8.dp))
+          Icon(Icons.AutoMirrored.Filled.ArrowForward, contentDescription = null, modifier = Modifier.size(18.dp))
         }
       }
     }
@@ -891,105 +587,103 @@ private fun ActiveSpotErrorDrillView(
 }
 
 @Composable
-private fun TrainingFinishedCard(
-  score: Int,
-  total: Int,
+private fun SessionSummary(
+  session: TrainingSession,
   rule: StructuredRule,
+  onReviewMistakes: () -> Unit,
   onRestart: () -> Unit,
-  onExploreRule: () -> Unit
+  onExploreRule: () -> Unit,
+  onNextRule: (() -> Unit)?
 ) {
-  Card(
-    modifier = Modifier.fillMaxWidth(),
-    shape = RoundedCornerShape(16.dp),
-    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-    elevation = CardDefaults.cardElevation(defaultElevation = 3.dp),
-    border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)
-  ) {
-    Column(
-      modifier = Modifier.padding(24.dp),
-      horizontalAlignment = Alignment.CenterHorizontally
-    ) {
-      Box(
-        modifier = Modifier
-          .size(64.dp)
-          .clip(CircleShape)
-          .background(AppThemeColors.goldContainer),
-        contentAlignment = Alignment.Center
-      ) {
-        Icon(
-          imageVector = Icons.Default.EmojiEvents,
-          contentDescription = null,
-          tint = AppThemeColors.onGoldContainer,
-          modifier = Modifier.size(36.dp)
-        )
+  val total = session.itemIds.size
+  val ratio = if (total == 0) 0f else session.score.toFloat() / total
+  val message = when {
+    ratio >= 1f -> R.string.summary_perfect
+    ratio >= 0.7f -> R.string.summary_good
+    else -> R.string.summary_keep_going
+  }
+
+  DrillCard {
+    Text(
+      stringResource(if (session.isReview) R.string.summary_review_title else R.string.summary_title),
+      style = MaterialTheme.typography.titleLarge,
+      fontWeight = FontWeight.Bold
+    )
+    Spacer(Modifier.height(8.dp))
+    Text(
+      text = "${session.score} / $total",
+      style = MaterialTheme.typography.displaySmall,
+      fontWeight = FontWeight.ExtraBold,
+      color = if (ratio >= 0.7f) AppThemeColors.success else MaterialTheme.colorScheme.primary
+    )
+    Text(stringResource(message), style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+
+    val mistakes = session.mistakes
+    if (mistakes.isNotEmpty()) {
+      Spacer(Modifier.height(16.dp))
+      Text(stringResource(R.string.summary_mistakes), style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold)
+      Spacer(Modifier.height(6.dp))
+      mistakes.forEach { result ->
+        val (prompt, expected) = when (session.mode) {
+          DrillMode.PRODUCTION -> rule.productionDrills.firstOrNull { it.id == result.itemId }
+            ?.let { it.basePrompt to it.targetAnswer }
+          DrillMode.SPOT_ERROR -> rule.spotErrorDrills.firstOrNull { it.id == result.itemId }
+            ?.let { it.passage to "${it.errorWord} → ${it.correction}" }
+        } ?: return@forEach
+        HorizontalDivider(Modifier.padding(vertical = 6.dp))
+        Text(prompt, style = MaterialTheme.typography.bodyMedium)
+        Row(verticalAlignment = Alignment.CenterVertically) {
+          Icon(Icons.Default.Cancel, contentDescription = null, tint = AppThemeColors.red, modifier = Modifier.size(16.dp))
+          Spacer(Modifier.width(4.dp))
+          Text(result.given.ifBlank { "—" }, style = MaterialTheme.typography.bodySmall, color = AppThemeColors.red)
+          Spacer(Modifier.width(12.dp))
+          Icon(Icons.Default.CheckCircle, contentDescription = null, tint = AppThemeColors.success, modifier = Modifier.size(16.dp))
+          Spacer(Modifier.width(4.dp))
+          Text(expected, style = MaterialTheme.typography.bodySmall, color = AppThemeColors.success, fontWeight = FontWeight.Bold)
+        }
       }
+    }
 
-      Spacer(modifier = Modifier.height(14.dp))
-
-      Text(
-        text = "Session d'entraînement terminée !",
-        style = MaterialTheme.typography.titleLarge,
-        fontWeight = FontWeight.Bold,
-        textAlign = TextAlign.Center
-      )
-
-      Spacer(modifier = Modifier.height(6.dp))
-
-      Text(
-        text = "Score : $score / $total réponses correctes",
-        style = MaterialTheme.typography.bodyMedium,
-        fontWeight = FontWeight.SemiBold,
-        color = AppThemeColors.primary
-      )
-
-      Spacer(modifier = Modifier.height(20.dp))
-
-      Row(
-        modifier = Modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.spacedBy(10.dp)
-      ) {
-        OutlinedButton(
-          onClick = onRestart,
-          modifier = Modifier
-            .weight(1f)
-            .height(48.dp),
-          shape = RoundedCornerShape(12.dp)
-        ) {
-          Icon(Icons.Default.Refresh, contentDescription = null, modifier = Modifier.size(16.dp))
-          Spacer(modifier = Modifier.width(6.dp))
-          Text("Recommencer")
-        }
-
-        Button(
-          onClick = onExploreRule,
-          modifier = Modifier
-            .weight(1f)
-            .height(48.dp),
-          shape = RoundedCornerShape(12.dp),
-          colors = ButtonDefaults.buttonColors(containerColor = AppThemeColors.primary)
-        ) {
-          Icon(Icons.Default.Visibility, contentDescription = null, modifier = Modifier.size(16.dp))
-          Spacer(modifier = Modifier.width(6.dp))
-          Text("Voir la règle")
-        }
+    Spacer(Modifier.height(18.dp))
+    if (mistakes.isNotEmpty()) {
+      Button(onClick = onReviewMistakes, modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp)) {
+        Icon(Icons.Default.Replay, contentDescription = null, modifier = Modifier.size(18.dp))
+        Spacer(Modifier.width(8.dp))
+        Text(stringResource(R.string.summary_review_mistakes, mistakes.size))
+      }
+      Spacer(Modifier.height(8.dp))
+    }
+    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+      OutlinedButton(onClick = onRestart, modifier = Modifier.weight(1f).heightIn(min = 48.dp)) {
+        Icon(Icons.Default.Refresh, contentDescription = null, modifier = Modifier.size(18.dp))
+        Spacer(Modifier.width(6.dp))
+        Text(stringResource(R.string.summary_restart))
+      }
+      OutlinedButton(onClick = onExploreRule, modifier = Modifier.weight(1f).heightIn(min = 48.dp)) {
+        Icon(Icons.AutoMirrored.Filled.MenuBook, contentDescription = null, modifier = Modifier.size(18.dp))
+        Spacer(Modifier.width(6.dp))
+        Text(stringResource(R.string.summary_see_rule))
+      }
+    }
+    if (onNextRule != null) {
+      Spacer(Modifier.height(8.dp))
+      TextButton(onClick = onNextRule, modifier = Modifier.fillMaxWidth()) {
+        Text(stringResource(R.string.summary_next_rule))
+        Spacer(Modifier.width(6.dp))
+        Icon(Icons.AutoMirrored.Filled.ArrowForward, contentDescription = null, modifier = Modifier.size(18.dp))
       }
     }
   }
 }
 
 @Composable
-private fun NoDrillsAvailableCard(rule: StructuredRule) {
-  Card(
-    modifier = Modifier.fillMaxWidth(),
-    shape = RoundedCornerShape(14.dp),
-    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)
-  ) {
-    Column(modifier = Modifier.padding(20.dp), horizontalAlignment = Alignment.CenterHorizontally) {
-      Text(
-        text = "Aucun exercice disponible pour ce mode sur « ${rule.titleFr} ».",
-        style = MaterialTheme.typography.bodyMedium,
-        textAlign = TextAlign.Center
-      )
+private fun NoDrillsCard(onSwitchMode: () -> Unit, onPickRule: () -> Unit) {
+  DrillCard {
+    Text(stringResource(R.string.train_no_drills), style = MaterialTheme.typography.bodyLarge, fontWeight = FontWeight.Bold)
+    Spacer(Modifier.height(12.dp))
+    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+      OutlinedButton(onClick = onSwitchMode) { Text(stringResource(R.string.train_switch_mode)) }
+      OutlinedButton(onClick = onPickRule) { Text(stringResource(R.string.rule_change)) }
     }
   }
 }

@@ -114,7 +114,7 @@ object AppThemeColors {
     @ReadOnlyComposable
     get() = when (LocalThemeMode.current) {
       ThemeMode.LIGHT -> LightPrimary
-      ThemeMode.DARK -> DarkPrimary
+      else -> DarkPrimary
     }
 
   val primaryContainer: Color
@@ -122,7 +122,7 @@ object AppThemeColors {
     @ReadOnlyComposable
     get() = when (LocalThemeMode.current) {
       ThemeMode.LIGHT -> LightPrimaryContainer
-      ThemeMode.DARK -> DarkPrimaryContainer
+      else -> DarkPrimaryContainer
     }
 
   val onPrimaryContainer: Color
@@ -130,7 +130,7 @@ object AppThemeColors {
     @ReadOnlyComposable
     get() = when (LocalThemeMode.current) {
       ThemeMode.LIGHT -> LightOnPrimaryContainer
-      ThemeMode.DARK -> DarkOnPrimaryContainer
+      else -> DarkOnPrimaryContainer
     }
 
   val red: Color
@@ -138,7 +138,7 @@ object AppThemeColors {
     @ReadOnlyComposable
     get() = when (LocalThemeMode.current) {
       ThemeMode.LIGHT -> FrenchRed
-      ThemeMode.DARK -> FrenchRedDarkTheme
+      else -> FrenchRedDarkTheme
     }
 
   val redContainer: Color
@@ -146,7 +146,7 @@ object AppThemeColors {
     @ReadOnlyComposable
     get() = when (LocalThemeMode.current) {
       ThemeMode.LIGHT -> FrenchRedContainerLight
-      ThemeMode.DARK -> FrenchRedContainerDark
+      else -> FrenchRedContainerDark
     }
 
   val onRedContainer: Color
@@ -154,7 +154,7 @@ object AppThemeColors {
     @ReadOnlyComposable
     get() = when (LocalThemeMode.current) {
       ThemeMode.LIGHT -> FrenchRedOnContainerLight
-      ThemeMode.DARK -> FrenchRedOnContainerDark
+      else -> FrenchRedOnContainerDark
     }
 
   val success: Color
@@ -162,7 +162,7 @@ object AppThemeColors {
     @ReadOnlyComposable
     get() = when (LocalThemeMode.current) {
       ThemeMode.LIGHT -> EmeraldSuccessLightAccessible
-      ThemeMode.DARK -> EmeraldSuccessDarkTheme
+      else -> EmeraldSuccessDarkTheme
     }
 
   val successContainer: Color
@@ -170,7 +170,7 @@ object AppThemeColors {
     @ReadOnlyComposable
     get() = when (LocalThemeMode.current) {
       ThemeMode.LIGHT -> EmeraldSuccessContainerLight
-      ThemeMode.DARK -> EmeraldSuccessContainerDark
+      else -> EmeraldSuccessContainerDark
     }
 
   val onSuccessContainer: Color
@@ -178,7 +178,7 @@ object AppThemeColors {
     @ReadOnlyComposable
     get() = when (LocalThemeMode.current) {
       ThemeMode.LIGHT -> EmeraldSuccessOnContainerLight
-      ThemeMode.DARK -> EmeraldSuccessOnContainerDark
+      else -> EmeraldSuccessOnContainerDark
     }
 
   val gold: Color
@@ -186,7 +186,7 @@ object AppThemeColors {
     @ReadOnlyComposable
     get() = when (LocalThemeMode.current) {
       ThemeMode.LIGHT -> GoldStarLightAccessible
-      ThemeMode.DARK -> GoldStarDarkTheme
+      else -> GoldStarDarkTheme
     }
 
   val goldContainer: Color
@@ -194,7 +194,7 @@ object AppThemeColors {
     @ReadOnlyComposable
     get() = when (LocalThemeMode.current) {
       ThemeMode.LIGHT -> GoldStarContainerLight
-      ThemeMode.DARK -> GoldStarContainerDark
+      else -> GoldStarContainerDark
     }
 
   val onGoldContainer: Color
@@ -202,7 +202,7 @@ object AppThemeColors {
     @ReadOnlyComposable
     get() = when (LocalThemeMode.current) {
       ThemeMode.LIGHT -> GoldStarOnContainerLight
-      ThemeMode.DARK -> GoldStarOnContainerDark
+      else -> GoldStarOnContainerDark
     }
 
   val flame: Color
@@ -210,7 +210,7 @@ object AppThemeColors {
     @ReadOnlyComposable
     get() = when (LocalThemeMode.current) {
       ThemeMode.LIGHT -> FlameOrangeLightAccessible
-      ThemeMode.DARK -> FlameOrangeDarkTheme
+      else -> FlameOrangeDarkTheme
     }
 
   val flameContainer: Color
@@ -218,7 +218,7 @@ object AppThemeColors {
     @ReadOnlyComposable
     get() = when (LocalThemeMode.current) {
       ThemeMode.LIGHT -> FlameOrangeContainerLight
-      ThemeMode.DARK -> FlameOrangeContainerDark
+      else -> FlameOrangeContainerDark
     }
 
   val onFlameContainer: Color
@@ -226,6 +226,6 @@ object AppThemeColors {
     @ReadOnlyComposable
     get() = when (LocalThemeMode.current) {
       ThemeMode.LIGHT -> FlameOrangeOnContainerLight
-      ThemeMode.DARK -> FlameOrangeOnContainerDark
+      else -> FlameOrangeOnContainerDark
     }
 }

@@ -2,163 +2,174 @@ package com.example.ui
 
 import android.app.Application
 import android.content.ContentValues
-import android.content.Context
+import android.content.res.Configuration
 import android.media.MediaPlayer
 import android.provider.MediaStore
 import android.widget.Toast
+import androidx.annotation.StringRes
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
+import com.example.R
 import com.example.data.GrammarRepository
-import com.example.data.engine.GenerationFormat
+import com.example.data.engine.AnswerChecker
+import com.example.data.engine.AnswerVerdict
 import com.example.data.engine.GeminiGenerationRepository
 import com.example.data.engine.GeminiTtsRepository
+import com.example.data.engine.GenerationFormat
+import com.example.data.engine.GenerationRequest
 import com.example.data.engine.GrammarRuleRepository
-import com.example.data.grammar.GrammarData
-import com.example.data.local.AchievementEntity
+import com.example.data.engine.StructuredRule
 import com.example.data.local.GrammarDatabase
-import com.example.data.local.LessonProgressEntity
-import com.example.data.local.MistakeEntity
 import com.example.data.local.RuleTrainingProgressEntity
-import com.example.data.local.SavedGenerationEntity
-import com.example.data.local.UserStatsEntity
-import com.example.data.model.GrammarCategory
-import com.example.data.model.GrammarLesson
-import com.example.data.model.QuizQuestion
+import com.example.data.prefs.AppPreferences
+import com.example.data.prefs.DrillMode
+import com.example.data.prefs.StartMode
+import com.example.ui.generation.GenerationForm
 import com.example.ui.generation.GenerationUiState
 import com.example.ui.generation.SavedGenerationUi
+import com.example.ui.i18n.AppLanguage
+import com.example.ui.navigation.Routes
 import com.example.ui.theme.ThemeMode
 import com.example.util.FrenchAudioHelper
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.Job
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
+import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.File
 
-sealed interface AppScreen {
-  data object ModeSelect : AppScreen
-  data object Exploration : AppScreen
-  data object Training : AppScreen
-  data object Codex : AppScreen
-  data object QuestMap : AppScreen
-  data object SpeedDrill : AppScreen
-  data object Mistakes : AppScreen
-  data class LessonDetail(val lessonId: String) : AppScreen
-  data class Quiz(val lessonId: String) : AppScreen
+/** Result of one drill item within a training session. */
+data class DrillResult(
+  val itemId: String,
+  val correct: Boolean,
+  /** What the learner typed (production) or the token they picked (spot-the-error). */
+  val given: String
+)
+
+/** Feedback shown after the current drill item was submitted. */
+data class DrillFeedback(
+  val verdict: AnswerVerdict,
+  val given: String,
+  val selectedTokenIndex: Int? = null
+)
+
+/**
+ * A training session lives in the ViewModel so it survives tab switches and rotation.
+ * [itemIds] is the ordered set of drill items for this run: all items of the rule, or only the
+ * missed ones when [isReview] is true.
+ */
+data class TrainingSession(
+  val ruleId: String,
+  val mode: DrillMode,
+  val itemIds: List<String>,
+  val index: Int = 0,
+  val feedback: DrillFeedback? = null,
+  val results: List<DrillResult> = emptyList(),
+  val isFinished: Boolean = false,
+  val isReview: Boolean = false,
+  /** Distinguishes runs over the same items, so per-item UI state (typed text) resets on restart. */
+  val sessionId: Long = System.nanoTime()
+) {
+  val score: Int get() = results.count { it.correct }
+  val mistakes: List<DrillResult> get() = results.filterNot { it.correct }
 }
-
-data class QuizSessionState(
-  val lesson: GrammarLesson? = null,
-  val questions: List<QuizQuestion> = emptyList(),
-  val currentIndex: Int = 0,
-  val selectedOption: Int? = null,
-  val isAnswered: Boolean = false,
-  val isCorrect: Boolean = false,
-  val score: Int = 0,
-  val combo: Int = 0,
-  val maxCombo: Int = 0,
-  val isFinished: Boolean = false,
-  val xpEarned: Int = 0,
-  val starsEarned: Int = 0,
-  val heartsLeft: Int = 5
-)
-
-data class SpeedDrillState(
-  val isActive: Boolean = false,
-  val isFinished: Boolean = false,
-  val secondsRemaining: Int = 60,
-  val questions: List<QuizQuestion> = emptyList(),
-  val currentIndex: Int = 0,
-  val score: Int = 0,
-  val combo: Int = 0,
-  val maxCombo: Int = 0,
-  val feedbackColor: Long? = null // For instant flash feedback
-)
 
 class GrammarViewModel(application: Application) : AndroidViewModel(application) {
 
-  private val repository: GrammarRepository
+  private val prefs = AppPreferences(application)
+  private val repository = GrammarRepository(GrammarDatabase.getDatabase(application).grammarDao())
   private val generationRepository = GeminiGenerationRepository()
   private val ttsRepository = GeminiTtsRepository()
   private val audioHelper = FrenchAudioHelper(application)
   private var podcastPlayer: MediaPlayer? = null
 
-  private val _isPodcastPlaying = MutableStateFlow(false)
-  val isPodcastPlaying: StateFlow<Boolean> = _isPodcastPlaying.asStateFlow()
+  /** All rules in curriculum order (A1 → C2, keeping the authoring order inside a level). */
+  val rules: List<StructuredRule> = GrammarRuleRepository.getAllRules().sortedBy { it.level }
 
-  // Path of the saved-generation audio currently playing (distinct from the just-generated
-  // podcast's own audio, which uses podcastAudioPath/isPodcastPlaying above).
-  private val _playingSavedAudioPath = MutableStateFlow<String?>(null)
-  val playingSavedAudioPath: StateFlow<String?> = _playingSavedAudioPath.asStateFlow()
-  private val themePrefs = application.getSharedPreferences("theme_prefs", Context.MODE_PRIVATE)
-  private val apiKeyPrefs = application.getSharedPreferences("gemini_api_prefs", Context.MODE_PRIVATE)
+  private val defaultRuleId = rules.first().id
 
-  val isSpeaking: StateFlow<Boolean> = audioHelper.isSpeaking
+  private fun validRuleId(id: String?): String =
+    id?.takeIf { candidate -> rules.any { it.id == candidate } } ?: defaultRuleId
 
-  private val _themeMode = MutableStateFlow(
-    runCatching {
-      val saved = themePrefs.getString("saved_theme_mode", ThemeMode.DARK.name) ?: ThemeMode.DARK.name
-      ThemeMode.valueOf(saved)
-    }.getOrDefault(ThemeMode.DARK)
-  )
+  fun ruleById(id: String): StructuredRule = rules.firstOrNull { it.id == id } ?: rules.first()
+
+  // --- APP SETTINGS ---
+
+  /** Where the app opens; computed once so the NavHost start destination never changes mid-session. */
+  val startRoute: String = when {
+    !prefs.onboardingDone -> Routes.ONBOARDING
+    prefs.startMode == StartMode.TRAIN -> Routes.TRAIN
+    else -> Routes.EXPLORE
+  }
+
+  private val _themeMode = MutableStateFlow(prefs.themeMode)
   val themeMode: StateFlow<ThemeMode> = _themeMode.asStateFlow()
 
   fun setThemeMode(mode: ThemeMode) {
     _themeMode.value = mode
-    themePrefs.edit().putString("saved_theme_mode", mode.name).apply()
+    prefs.themeMode = mode
   }
 
-  fun cycleThemeMode() {
-    val next = when (_themeMode.value) {
-      ThemeMode.LIGHT -> ThemeMode.DARK
-      ThemeMode.DARK -> ThemeMode.LIGHT
+  private val _startMode = MutableStateFlow(prefs.startMode)
+  val startMode: StateFlow<StartMode> = _startMode.asStateFlow()
+
+  fun setStartMode(mode: StartMode) {
+    _startMode.value = mode
+    prefs.startMode = mode
+  }
+
+  fun completeOnboarding(mode: StartMode) {
+    setStartMode(mode)
+    prefs.onboardingDone = true
+  }
+
+  /** On-demand English help. Not persisted: every launch starts in French. */
+  private val _language = MutableStateFlow(AppLanguage.FR)
+  val language: StateFlow<AppLanguage> = _language.asStateFlow()
+
+  fun toggleLanguage() {
+    _language.update { if (it == AppLanguage.FR) AppLanguage.EN else AppLanguage.FR }
+  }
+
+  // User-supplied Google AI Studio (Gemini Developer API) key — kept only in local
+  // SharedPreferences on this device, never bundled with the app or sent anywhere but
+  // Google's own generativelanguage.googleapis.com endpoint.
+  private val _geminiApiKey = MutableStateFlow(prefs.geminiApiKey)
+  val geminiApiKey: StateFlow<String> = _geminiApiKey.asStateFlow()
+
+  fun setGeminiApiKey(key: String) {
+    val trimmed = key.trim()
+    _geminiApiKey.value = trimmed
+    prefs.geminiApiKey = trimmed
+  }
+
+  // --- RULE SELECTION (shared by Explore, Train, Create and Index) ---
+
+  private val _levelFilter = MutableStateFlow(prefs.levelFilter)
+  /** CEFR level the rule lists are filtered on; null means all levels. */
+  val levelFilter: StateFlow<String?> = _levelFilter.asStateFlow()
+
+  fun setLevelFilter(level: String?) {
+    _levelFilter.value = level
+    prefs.levelFilter = level
+  }
+
+  private val _exploreRuleId = MutableStateFlow(validRuleId(prefs.exploreRuleId))
+  val exploreRuleId: StateFlow<String> = _exploreRuleId.asStateFlow()
+
+  fun selectExploreRule(ruleId: String) {
+    val id = validRuleId(ruleId)
+    _exploreRuleId.value = id
+    prefs.exploreRuleId = id
+    if (_generationForm.value.followsExplore) {
+      _generationForm.update { it.copy(ruleId = id, level = ruleById(id).level) }
     }
-    setThemeMode(next)
   }
-
-  init {
-    val db = GrammarDatabase.getDatabase(application)
-    repository = GrammarRepository(db.grammarDao())
-    viewModelScope.launch {
-      repository.initDefaultDataIfNeeded()
-    }
-  }
-
-  val userStats: StateFlow<UserStatsEntity> = repository.userStats
-    .map { it ?: UserStatsEntity() }
-    .stateIn(
-      scope = viewModelScope,
-      started = SharingStarted.WhileSubscribed(5000),
-      initialValue = UserStatsEntity()
-    )
-
-  val progressMap: StateFlow<Map<String, LessonProgressEntity>> = repository.lessonProgressList
-    .map { list -> list.associateBy { it.lessonId } }
-    .stateIn(
-      scope = viewModelScope,
-      started = SharingStarted.WhileSubscribed(5000),
-      initialValue = emptyMap()
-    )
-
-  val mistakes: StateFlow<List<MistakeEntity>> = repository.mistakes
-    .stateIn(
-      scope = viewModelScope,
-      started = SharingStarted.WhileSubscribed(5000),
-      initialValue = emptyList()
-    )
-
-  val achievements: StateFlow<List<AchievementEntity>> = repository.achievements
-    .stateIn(
-      scope = viewModelScope,
-      started = SharingStarted.WhileSubscribed(5000),
-      initialValue = emptyList()
-    )
 
   val ruleTrainingProgressMap: StateFlow<Map<String, RuleTrainingProgressEntity>> =
     repository.ruleTrainingProgress
@@ -169,6 +180,134 @@ class GrammarViewModel(application: Application) : AndroidViewModel(application)
         initialValue = emptyMap()
       )
 
+  // --- TRAINING ---
+
+  private val _training = MutableStateFlow(
+    newSession(validRuleId(prefs.trainRuleId), prefs.drillMode)
+  )
+  val training: StateFlow<TrainingSession> = _training.asStateFlow()
+
+  private fun drillItemIds(rule: StructuredRule, mode: DrillMode): List<String> = when (mode) {
+    DrillMode.PRODUCTION -> rule.productionDrills.map { it.id }
+    DrillMode.SPOT_ERROR -> rule.spotErrorDrills.map { it.id }
+  }
+
+  private fun newSession(ruleId: String, mode: DrillMode): TrainingSession =
+    TrainingSession(ruleId = ruleId, mode = mode, itemIds = drillItemIds(ruleById(ruleId), mode))
+
+  /** Opens Training on [ruleId]; an unfinished session on the same rule is kept, not restarted. */
+  fun selectTrainingRule(ruleId: String) {
+    val id = validRuleId(ruleId)
+    prefs.trainRuleId = id
+    val current = _training.value
+    if (current.ruleId == id && !current.isFinished) return
+    _training.value = newSession(id, current.mode)
+  }
+
+  fun setDrillMode(mode: DrillMode) {
+    prefs.drillMode = mode
+    val current = _training.value
+    if (current.mode == mode) return
+    _training.value = newSession(current.ruleId, mode)
+  }
+
+  fun submitProductionAnswer(input: String) {
+    val session = _training.value
+    if (session.feedback != null || session.isFinished) return
+    val itemId = session.itemIds.getOrNull(session.index) ?: return
+    val drill = ruleById(session.ruleId).productionDrills.firstOrNull { it.id == itemId } ?: return
+    val verdict = AnswerChecker.check(input, listOf(drill.targetAnswer) + drill.acceptedAnswers)
+    _training.value = session.copy(
+      feedback = DrillFeedback(verdict = verdict, given = input.trim()),
+      results = session.results + DrillResult(itemId, verdict == AnswerVerdict.CORRECT, input.trim())
+    )
+  }
+
+  fun submitSpotError(tokenIndex: Int) {
+    val session = _training.value
+    if (session.feedback != null || session.isFinished) return
+    val itemId = session.itemIds.getOrNull(session.index) ?: return
+    val drill = ruleById(session.ruleId).spotErrorDrills.firstOrNull { it.id == itemId } ?: return
+    val correct = tokenIndex == drill.errorTokenIndex
+    val given = drill.tokens.getOrElse(tokenIndex) { "" }
+    _training.value = session.copy(
+      feedback = DrillFeedback(
+        verdict = if (correct) AnswerVerdict.CORRECT else AnswerVerdict.WRONG,
+        given = given,
+        selectedTokenIndex = tokenIndex
+      ),
+      results = session.results + DrillResult(itemId, correct, given)
+    )
+  }
+
+  fun nextDrill() {
+    val session = _training.value
+    if (session.feedback == null) return
+    if (session.index + 1 < session.itemIds.size) {
+      _training.value = session.copy(index = session.index + 1, feedback = null)
+    } else {
+      _training.value = session.copy(feedback = null, isFinished = true)
+      // A review run only replays missed items; recording it would overwrite the real best score.
+      if (!session.isReview) {
+        viewModelScope.launch {
+          repository.recordRuleTrainingResult(
+            ruleId = session.ruleId,
+            isProductionMode = session.mode == DrillMode.PRODUCTION,
+            score = session.score,
+            total = session.itemIds.size
+          )
+        }
+      }
+    }
+  }
+
+  fun restartTraining() {
+    val session = _training.value
+    _training.value = newSession(session.ruleId, session.mode)
+  }
+
+  /** Replays only the items missed in the session that just finished. */
+  fun reviewMistakes() {
+    val session = _training.value
+    val missed = session.mistakes.map { it.itemId }.distinct()
+    if (missed.isEmpty()) return
+    _training.value = TrainingSession(
+      ruleId = session.ruleId,
+      mode = session.mode,
+      itemIds = missed,
+      isReview = true
+    )
+  }
+
+  /** The rule after [ruleId] in curriculum order, or null at the end. */
+  fun nextRuleId(ruleId: String): String? {
+    val index = rules.indexOfFirst { it.id == ruleId }
+    return rules.getOrNull(index + 1)?.id
+  }
+
+  // --- GENERATION ---
+
+  private val _generationForm = MutableStateFlow(
+    GenerationForm(ruleId = _exploreRuleId.value, level = ruleById(_exploreRuleId.value).level)
+  )
+  val generationForm: StateFlow<GenerationForm> = _generationForm.asStateFlow()
+
+  fun updateGenerationForm(transform: (GenerationForm) -> GenerationForm) {
+    _generationForm.update(transform)
+  }
+
+  /** Picking a rule inside Create detaches the form from the rule open in Explore. */
+  fun selectGenerationRule(ruleId: String) {
+    val id = validRuleId(ruleId)
+    _generationForm.update { it.copy(ruleId = id, level = ruleById(id).level, followsExplore = false) }
+  }
+
+  /** "Create a text on this rule" from Explore. */
+  fun prepareGenerationForRule(ruleId: String) {
+    val id = validRuleId(ruleId)
+    _generationForm.update { it.copy(ruleId = id, level = ruleById(id).level, followsExplore = true) }
+  }
+
   private val _generationState = MutableStateFlow(GenerationUiState())
   val generationState: StateFlow<GenerationUiState> = _generationState.asStateFlow()
 
@@ -177,12 +316,13 @@ class GrammarViewModel(application: Application) : AndroidViewModel(application)
       list.map {
         SavedGenerationUi(
           id = it.id,
-          format = GenerationFormat.valueOf(it.format),
+          format = runCatching { GenerationFormat.valueOf(it.format) }.getOrDefault(GenerationFormat.TEXT),
           level = it.level,
           grammarPointTitle = it.grammarPointTitle,
           theme = it.theme,
           text = it.text,
-          audioPath = it.audioPath
+          audioPath = it.audioPath,
+          createdTimestamp = it.createdTimestamp
         )
       }
     }
@@ -192,89 +332,43 @@ class GrammarViewModel(application: Application) : AndroidViewModel(application)
       initialValue = emptyList()
     )
 
-  // User-supplied Google AI Studio (Gemini Developer API) key — kept only in local
-  // SharedPreferences on this device, never bundled with the app or sent anywhere but
-  // Google's own generativelanguage.googleapis.com endpoint.
-  private val _geminiApiKey = MutableStateFlow(apiKeyPrefs.getString("gemini_api_key", "") ?: "")
-  val geminiApiKey: StateFlow<String> = _geminiApiKey.asStateFlow()
-
-  fun setGeminiApiKey(key: String) {
-    val trimmed = key.trim()
-    _geminiApiKey.value = trimmed
-    apiKeyPrefs.edit().putString("gemini_api_key", trimmed).apply()
-  }
-
-  private val _currentScreen = MutableStateFlow<AppScreen>(AppScreen.ModeSelect)
-  val currentScreen: StateFlow<AppScreen> = _currentScreen.asStateFlow()
-
-  private val _selectedExplorationRuleId = MutableStateFlow("subjonctif-present")
-  val selectedExplorationRuleId: StateFlow<String> = _selectedExplorationRuleId.asStateFlow()
-
-  private val _selectedTrainingRuleId = MutableStateFlow("subjonctif-present")
-  val selectedTrainingRuleId: StateFlow<String> = _selectedTrainingRuleId.asStateFlow()
-
-  private val _quizState = MutableStateFlow(QuizSessionState())
-  val quizState: StateFlow<QuizSessionState> = _quizState.asStateFlow()
-
-  private val _drillState = MutableStateFlow(SpeedDrillState())
-  val drillState: StateFlow<SpeedDrillState> = _drillState.asStateFlow()
-
-  private var drillTimerJob: Job? = null
-
-  fun selectExplorationRule(ruleId: String) {
-    _selectedExplorationRuleId.value = ruleId
-  }
-
-  fun startTrainingForRule(ruleId: String) {
-    _selectedTrainingRuleId.value = ruleId
-    _currentScreen.value = AppScreen.Training
-  }
-
-  fun startExplorationForRule(ruleId: String) {
-    _selectedExplorationRuleId.value = ruleId
-    _currentScreen.value = AppScreen.Exploration
-  }
-
-  fun getAllStructuredRules() = GrammarRuleRepository.getAllRules()
-
-  fun generateContent(level: String, ruleId: String, theme: String, format: GenerationFormat) {
-    val rule = GrammarRuleRepository.getRuleById(ruleId) ?: return
+  fun generateContent() {
+    val form = _generationForm.value
+    val rule = ruleById(form.ruleId)
     val apiKey = _geminiApiKey.value
     if (apiKey.isBlank()) {
-      _generationState.value = GenerationUiState(
-        isLoading = false,
-        error = "Ajoute ta clé API Gemini ci-dessus avant de générer du contenu."
-      )
+      _generationState.value = GenerationUiState(error = string(R.string.gen_error_no_key))
       return
     }
+    val theme = form.theme.trim().ifBlank { string(R.string.gen_default_theme) }
     stopPodcastAudio()
     _generationState.value = GenerationUiState(
       isLoading = true,
-      format = format,
-      level = level,
+      format = form.format,
+      level = form.level,
       grammarPointTitle = rule.titleFr,
       theme = theme
     )
     viewModelScope.launch {
       generationRepository.generate(
-        com.example.data.engine.GenerationRequest(
-          level = level,
+        GenerationRequest(
+          level = form.level,
           grammarPointTitle = rule.titleFr,
           theme = theme,
-          format = format
+          format = form.format
         ),
         apiKey = apiKey
       ).onSuccess { text ->
-        _generationState.value = _generationState.value.copy(isLoading = false, resultText = text, isSaved = false)
+        _generationState.update { it.copy(isLoading = false, resultText = text, isSaved = false) }
       }.onFailure { err ->
-        // Some exceptions (e.g. Android's NetworkOnMainThreadException) carry a null message,
-        // which used to surface as a bare, unhelpful "Erreur inconnue". Fall back to the
-        // exception's class name so there's always something actionable on screen.
-        val message = err.message?.takeIf { it.isNotBlank() }
-          ?: "Erreur inattendue (${err::class.simpleName ?: "inconnue"})"
-        _generationState.value = _generationState.value.copy(isLoading = false, error = message)
+        _generationState.update { it.copy(isLoading = false, error = errorMessage(err)) }
       }
     }
+  }
+
+  fun dismissGeneration() {
+    stopPodcastAudio()
+    _generationState.value = GenerationUiState()
   }
 
   /**
@@ -293,12 +387,14 @@ class GrammarViewModel(application: Application) : AndroidViewModel(application)
 
     viewModelScope.launch {
       val persistedAudioPath = state.podcastAudioPath?.let { cachePath ->
-        runCatching {
-          val cacheFile = File(cachePath)
-          val destFile = File(getApplication<Application>().filesDir, cacheFile.name)
-          cacheFile.copyTo(destFile, overwrite = true)
-          destFile.absolutePath
-        }.getOrNull()
+        withContext(Dispatchers.IO) {
+          runCatching {
+            val cacheFile = File(cachePath)
+            val destFile = File(getApplication<Application>().filesDir, cacheFile.name)
+            cacheFile.copyTo(destFile, overwrite = true)
+            destFile.absolutePath
+          }.getOrNull()
+        }
       }
       repository.saveGeneration(
         format = format.name,
@@ -308,7 +404,7 @@ class GrammarViewModel(application: Application) : AndroidViewModel(application)
         text = text,
         audioPath = persistedAudioPath
       )
-      _generationState.value = _generationState.value.copy(isSaved = true)
+      _generationState.update { it.copy(isSaved = true) }
     }
   }
 
@@ -331,7 +427,7 @@ class GrammarViewModel(application: Application) : AndroidViewModel(application)
       val result = withContext(Dispatchers.IO) {
         runCatching {
           val sourceFile = File(sourcePath)
-          if (!sourceFile.exists()) throw IllegalStateException("Fichier audio introuvable.")
+          if (!sourceFile.exists()) throw IllegalStateException(string(R.string.export_error_missing))
           val resolver = context.contentResolver
           val values = ContentValues().apply {
             put(MediaStore.Downloads.DISPLAY_NAME, sourceFile.name)
@@ -339,19 +435,27 @@ class GrammarViewModel(application: Application) : AndroidViewModel(application)
             put(MediaStore.Downloads.RELATIVE_PATH, "Download/FrenchGrammarQuest")
           }
           val uri = resolver.insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, values)
-            ?: throw IllegalStateException("Impossible de créer le fichier dans Téléchargements.")
+            ?: throw IllegalStateException(string(R.string.export_error_create))
           resolver.openOutputStream(uri)?.use { out ->
             sourceFile.inputStream().use { it.copyTo(out) }
-          } ?: throw IllegalStateException("Impossible d'écrire le fichier.")
+          } ?: throw IllegalStateException(string(R.string.export_error_write))
         }
       }
       val message = result.fold(
-        onSuccess = { "Podcast enregistré dans Téléchargements/FrenchGrammarQuest" },
-        onFailure = { err -> "Erreur lors de l'export : ${err.message ?: "inconnue"}" }
+        onSuccess = { string(R.string.export_success) },
+        onFailure = { err -> string(R.string.export_error, errorMessage(err)) }
       )
       Toast.makeText(context, message, Toast.LENGTH_LONG).show()
     }
   }
+
+  private val _isPodcastPlaying = MutableStateFlow(false)
+  val isPodcastPlaying: StateFlow<Boolean> = _isPodcastPlaying.asStateFlow()
+
+  // Path of the saved-generation audio currently playing (distinct from the just-generated
+  // podcast's own audio, which uses podcastAudioPath/isPodcastPlaying above).
+  private val _playingSavedAudioPath = MutableStateFlow<String?>(null)
+  val playingSavedAudioPath: StateFlow<String?> = _playingSavedAudioPath.asStateFlow()
 
   /** Plays back audio belonging to a saved generation (separate from the just-generated podcast). */
   fun playSavedAudio(path: String) {
@@ -375,18 +479,15 @@ class GrammarViewModel(application: Application) : AndroidViewModel(application)
   fun synthesizePodcastAudio(script: String) {
     val apiKey = _geminiApiKey.value
     if (apiKey.isBlank()) {
-      _generationState.value = _generationState.value.copy(
-        isSynthesizingAudio = false,
-        audioError = "Ajoute ta clé API Gemini ci-dessus avant de générer l'audio."
-      )
+      _generationState.update {
+        it.copy(isSynthesizingAudio = false, audioError = string(R.string.gen_error_no_key))
+      }
       return
     }
     stopPodcastAudio()
-    _generationState.value = _generationState.value.copy(
-      isSynthesizingAudio = true,
-      audioError = null,
-      podcastAudioPath = null
-    )
+    _generationState.update {
+      it.copy(isSynthesizingAudio = true, audioError = null, podcastAudioPath = null)
+    }
     viewModelScope.launch {
       ttsRepository.synthesizeDialogue(
         script = script,
@@ -394,16 +495,15 @@ class GrammarViewModel(application: Application) : AndroidViewModel(application)
         speaker2 = "Nadia",
         apiKey = apiKey
       ).onSuccess { wavBytes ->
-        val file = File(getApplication<Application>().cacheDir, "podcast_${System.currentTimeMillis()}.wav")
-        file.writeBytes(wavBytes)
-        _generationState.value = _generationState.value.copy(
-          isSynthesizingAudio = false,
-          podcastAudioPath = file.absolutePath
-        )
+        val file = withContext(Dispatchers.IO) {
+          File(getApplication<Application>().cacheDir, "podcast_${System.currentTimeMillis()}.wav")
+            .also { it.writeBytes(wavBytes) }
+        }
+        _generationState.update {
+          it.copy(isSynthesizingAudio = false, podcastAudioPath = file.absolutePath)
+        }
       }.onFailure { err ->
-        val message = err.message?.takeIf { it.isNotBlank() }
-          ?: "Erreur inattendue (${err::class.simpleName ?: "inconnue"})"
-        _generationState.value = _generationState.value.copy(isSynthesizingAudio = false, audioError = message)
+        _generationState.update { it.copy(isSynthesizingAudio = false, audioError = errorMessage(err)) }
       }
     }
   }
@@ -431,217 +531,10 @@ class GrammarViewModel(application: Application) : AndroidViewModel(application)
     _playingSavedAudioPath.value = null
   }
 
-  /** Called when a Training-path drill session (production or spot-error) finishes. */
-  fun recordTrainingSession(ruleId: String, isProductionMode: Boolean, score: Int, total: Int) {
-    viewModelScope.launch {
-      repository.recordRuleTrainingResult(ruleId, isProductionMode, score, total)
-    }
-  }
-
-  fun navigateTo(screen: AppScreen) {
-    if (_drillState.value.isActive && screen != AppScreen.SpeedDrill) {
-      drillTimerJob?.cancel()
-      _drillState.value = SpeedDrillState()
-    }
-    _currentScreen.value = screen
-  }
-
-  // --- LESSON & QUIZ FLOW ---
-  fun startLesson(lessonId: String) {
-    _currentScreen.value = AppScreen.LessonDetail(lessonId)
-  }
-
-  fun startQuiz(lessonId: String) {
-    val lesson = GrammarData.getLesson(lessonId) ?: return
-    val currentHearts = userStats.value.hearts
-    if (currentHearts <= 0) {
-      // User needs hearts!
-      return
-    }
-
-    _quizState.value = QuizSessionState(
-      lesson = lesson,
-      questions = lesson.questions.shuffled(),
-      currentIndex = 0,
-      selectedOption = null,
-      isAnswered = false,
-      isCorrect = false,
-      score = 0,
-      combo = 0,
-      maxCombo = 0,
-      isFinished = false,
-      xpEarned = 0,
-      starsEarned = 0,
-      heartsLeft = currentHearts
-    )
-    _currentScreen.value = AppScreen.Quiz(lessonId)
-  }
-
-  fun selectQuizOption(index: Int) {
-    if (_quizState.value.isAnswered || _quizState.value.isFinished) return
-    _quizState.value = _quizState.value.copy(selectedOption = index)
-  }
-
-  fun submitQuizAnswer() {
-    val state = _quizState.value
-    val selected = state.selectedOption ?: return
-    if (state.isAnswered || state.isFinished) return
-
-    val currentQ = state.questions.getOrNull(state.currentIndex) ?: return
-    val correct = selected == currentQ.correctIndex
-
-    val newCombo = if (correct) state.combo + 1 else 0
-    val newMaxCombo = maxOf(state.maxCombo, newCombo)
-    val newScore = if (correct) state.score + 1 else state.score
-    var updatedHearts = state.heartsLeft
-
-    if (!correct) {
-      updatedHearts = maxOf(0, state.heartsLeft - 1)
-      viewModelScope.launch {
-        repository.loseHeart()
-        repository.recordMistake(currentQ, currentQ.options.getOrElse(selected) { "" })
-      }
-    }
-
-    _quizState.value = state.copy(
-      isAnswered = true,
-      isCorrect = correct,
-      score = newScore,
-      combo = newCombo,
-      maxCombo = newMaxCombo,
-      heartsLeft = updatedHearts
-    )
-  }
-
-  fun nextQuizQuestion() {
-    val state = _quizState.value
-    val nextIndex = state.currentIndex + 1
-
-    if (nextIndex >= state.questions.size || state.heartsLeft <= 0) {
-      // Finish Quiz Stage
-      val totalQuestions = state.questions.size
-      val percentage = if (totalQuestions > 0) (state.score.toDouble() / totalQuestions) * 100 else 0.0
-      val stars = when {
-        percentage >= 100.0 -> 3
-        percentage >= 70.0 -> 2
-        percentage >= 40.0 -> 1
-        else -> 0
-      }
-
-      val xp = (state.score * 10) + (state.maxCombo * 3) + (stars * 15)
-
-      _quizState.value = state.copy(
-        isFinished = true,
-        isAnswered = false,
-        starsEarned = stars,
-        xpEarned = xp
-      )
-
-      viewModelScope.launch {
-        state.lesson?.let { l ->
-          repository.recordLessonCompleted(l.id, l.categoryId, stars, state.score)
-        }
-        repository.addXp(xp, questionsAnswered = totalQuestions, correctAnswers = state.score)
-      }
-    } else {
-      _quizState.value = state.copy(
-        currentIndex = nextIndex,
-        selectedOption = null,
-        isAnswered = false,
-        isCorrect = false
-      )
-    }
-  }
-
-  // --- SPEED DRILL FLOW ---
-  fun startSpeedDrill() {
-    drillTimerJob?.cancel()
-    val questions = GrammarData.getSpeedDrillQuestions(20)
-    _drillState.value = SpeedDrillState(
-      isActive = true,
-      isFinished = false,
-      secondsRemaining = 60,
-      questions = questions,
-      currentIndex = 0,
-      score = 0,
-      combo = 0,
-      maxCombo = 0
-    )
-    _currentScreen.value = AppScreen.SpeedDrill
-
-    drillTimerJob = viewModelScope.launch {
-      while (_drillState.value.secondsRemaining > 0 && _drillState.value.isActive) {
-        delay(1000)
-        val remaining = _drillState.value.secondsRemaining - 1
-        _drillState.value = _drillState.value.copy(secondsRemaining = remaining)
-        if (remaining <= 0) {
-          finishSpeedDrill()
-        }
-      }
-    }
-  }
-
-  fun answerSpeedDrill(optionIndex: Int) {
-    val state = _drillState.value
-    if (!state.isActive || state.isFinished) return
-
-    val currentQ = state.questions.getOrNull(state.currentIndex) ?: return
-    val isCorrect = optionIndex == currentQ.correctIndex
-
-    val newCombo = if (isCorrect) state.combo + 1 else 0
-    val newScore = if (isCorrect) state.score + 1 else state.score
-    val newMaxCombo = maxOf(state.maxCombo, newCombo)
-    val nextIndex = state.currentIndex + 1
-
-    _drillState.value = state.copy(
-      score = newScore,
-      combo = newCombo,
-      maxCombo = newMaxCombo,
-      currentIndex = nextIndex,
-      feedbackColor = if (isCorrect) 0xFF10B981 else 0xFFEF4444
-    )
-
-    if (nextIndex >= state.questions.size) {
-      finishSpeedDrill()
-    }
-  }
-
-  private fun finishSpeedDrill() {
-    drillTimerJob?.cancel()
-    val finalScore = _drillState.value.score
-    _drillState.value = _drillState.value.copy(isActive = false, isFinished = true)
-
-    viewModelScope.launch {
-      repository.recordSpeedDrillResult(finalScore)
-    }
-  }
-
-  // --- USER PROGRESS ACTIONS ---
-  fun refillHeartsWithGems() {
-    viewModelScope.launch {
-      repository.refillHeartsWithGems()
-    }
-  }
-
-  fun toggleBookmark(lessonId: String, categoryId: String) {
-    viewModelScope.launch {
-      repository.toggleBookmark(lessonId, categoryId)
-    }
-  }
-
-  fun resolveMistake(mistakeId: Long) {
-    viewModelScope.launch {
-      repository.deleteMistake(mistakeId)
-    }
-  }
-
-  fun clearAllMistakes() {
-    viewModelScope.launch {
-      repository.clearAllMistakes()
-    }
-  }
-
   // --- AUDIO LISTENING (FRENCH TTS) ---
+
+  val isSpeaking: StateFlow<Boolean> = audioHelper.isSpeaking
+
   fun speakFrench(text: String) {
     audioHelper.speak(text)
   }
@@ -649,6 +542,21 @@ class GrammarViewModel(application: Application) : AndroidViewModel(application)
   fun stopAudio() {
     audioHelper.stop()
   }
+
+  // --- HELPERS ---
+
+  /** Resolves a string in the language currently shown, so ViewModel messages follow the EN toggle. */
+  private fun string(@StringRes id: Int, vararg args: Any): String {
+    val app = getApplication<Application>()
+    val config = Configuration(app.resources.configuration).apply { setLocale(_language.value.locale) }
+    return app.createConfigurationContext(config).resources.getString(id, *args)
+  }
+
+  // Some exceptions (e.g. Android's NetworkOnMainThreadException) carry a null message; fall back
+  // to the exception's class name so there's always something actionable on screen.
+  private fun errorMessage(err: Throwable): String =
+    err.message?.takeIf { it.isNotBlank() }
+      ?: string(R.string.error_unexpected, err::class.simpleName ?: "?")
 
   override fun onCleared() {
     super.onCleared()

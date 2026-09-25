@@ -1,3 +1,185 @@
 <resources>
     <string name="app_name">French Grammar Quest</string>
+
+    <!-- Navigation -->
+    <string name="nav_explore">Comprendre</string>
+    <string name="nav_train">S’entraîner</string>
+    <string name="nav_create">Créer</string>
+    <string name="nav_index">Index</string>
+    <string name="settings_title">Réglages</string>
+    <string name="language_show_english">Afficher l’aide en anglais</string>
+    <string name="language_back_to_french">Revenir au français</string>
+
+    <!-- Common actions -->
+    <string name="action_back">Retour</string>
+    <string name="action_cancel">Annuler</string>
+    <string name="action_clear">Effacer</string>
+    <string name="action_close">Fermer</string>
+    <string name="action_copy">Copier</string>
+    <string name="action_delete">Supprimer</string>
+    <string name="action_listen">Écouter</string>
+    <string name="action_stop">Arrêter</string>
+    <string name="action_remove">Retirer</string>
+    <string name="action_retry">Réessayer</string>
+    <string name="action_save">Enregistrer</string>
+    <string name="action_share">Partager</string>
+    <string name="action_show_more">Voir plus</string>
+    <string name="action_show_less">Réduire</string>
+    <string name="error_unexpected">Erreur inattendue (%1$s)</string>
+
+    <!-- Onboarding -->
+    <string name="onboarding_title">Comment veux-tu apprendre ?</string>
+    <string name="onboarding_subtitle">Choisis l’écran d’ouverture de l’application. Les deux modes restent accessibles à tout moment depuis la barre du bas.</string>
+    <string name="mode_explore_title">Comprendre d’abord</string>
+    <string name="mode_explore_desc">Une règle à la fois : structure, exemples par registre, texte à écouter.</string>
+    <string name="mode_train_title">S’entraîner d’abord</string>
+    <string name="mode_train_desc">Des exercices de saisie et de chasse à l’erreur, avec ton meilleur score par règle.</string>
+    <string name="onboarding_english_tip">Tu bloques sur une explication ? Touche « EN » en haut de l’écran pour passer en anglais, puis touche-le à nouveau pour revenir au français.</string>
+    <string name="onboarding_start">Commencer</string>
+    <string name="onboarding_change_later">Modifiable plus tard dans les Réglages.</string>
+
+    <!-- Settings -->
+    <string name="settings_theme">Thème</string>
+    <string name="theme_system">Système</string>
+    <string name="theme_light">Clair</string>
+    <string name="theme_dark">Sombre</string>
+    <string name="settings_start_mode">Écran d’ouverture</string>
+    <string name="settings_start_mode_desc">L’onglet affiché au lancement de l’application.</string>
+    <string name="settings_api_key">Clé API Gemini</string>
+    <string name="settings_api_key_desc">Nécessaire pour l’onglet Créer. La clé est gratuite et reste stockée uniquement sur cet appareil.</string>
+    <string name="settings_api_key_get">Obtenir une clé sur aistudio.google.com</string>
+    <string name="settings_api_key_saved">Clé enregistrée</string>
+    <string name="api_key_show">Afficher la clé</string>
+    <string name="api_key_hide">Masquer la clé</string>
+
+    <!-- Rule selection -->
+    <string name="level_all">Tous</string>
+    <string name="rule_change">Changer de règle</string>
+    <string name="rule_picker_title">Choisir une règle</string>
+    <string name="rule_picker_empty">Aucune règle ne correspond à ta recherche.</string>
+    <string name="rule_search_hint">Rechercher (subjonctif, accord, pronom…)</string>
+    <string name="rule_current">Règle affichée</string>
+    <string name="rule_trained">Entraînée</string>
+    <string name="rule_previous">Règle précédente</string>
+    <string name="rule_next">Règle suivante</string>
+    <string name="rule_position">Règle %1$d sur %2$d</string>
+    <string name="rule_outside_filter">Hors du filtre %1$s</string>
+    <string name="section_expanded">Déplié</string>
+    <string name="section_collapsed">Replié</string>
+
+    <!-- Explore -->
+    <string name="explore_train_rule">S’entraîner sur cette règle</string>
+    <string name="explore_create_text">Créer</string>
+    <string name="section_structure">Structure</string>
+    <string name="section_examples">Exemples par registre</string>
+    <string name="section_examples_subtitle">Courant, soutenu, familier, professionnel</string>
+    <string name="section_passage">Texte en contexte</string>
+    <string name="pillar_agreement">Accord</string>
+    <string name="pillar_verb">Système verbal</string>
+    <string name="pillar_pronoun">Pronoms</string>
+    <string name="pillar_preposition">Prépositions</string>
+    <string name="pillar_register">Registre et négation</string>
+    <string name="trigger_hint">Un déclencheur automatique, pas une théorie à retenir.</string>
+    <string name="contrast_with">À contraster avec : %1$s</string>
+    <string name="contrast_hint">Retiens la condition, pas un tableau de conjugaison.</string>
+    <string name="structure_formula_hint">Formule de la phrase. Touche un bloc pour voir son rôle.</string>
+    <string name="decision_yes">Oui : %1$s</string>
+    <string name="decision_no">Non : %1$s</string>
+    <string name="register_courant">Courant</string>
+    <string name="register_soutenu">Soutenu</string>
+    <string name="register_familier">Familier</string>
+    <string name="register_pro">Professionnel</string>
+    <string name="register_nuance">Nuance : %1$s</string>
+    <string name="passage_annotations_hint">Points de grammaire dans ce texte (touche pour analyser) :</string>
+    <string name="passage_analysis">Analyse : « %1$s »</string>
+    <string name="passage_pitfall">Piège à éviter : %1$s</string>
+
+    <!-- Train -->
+    <string name="drill_production">Saisie</string>
+    <string name="drill_spot_error">Chasse à l’erreur</string>
+    <string name="train_best_score">Meilleur score : %1$d/%2$d</string>
+    <string name="train_not_trained">Pas encore entraînée</string>
+    <string name="train_item_position">Exercice %1$d / %2$d</string>
+    <string name="train_score_so_far">%1$d juste(s)</string>
+    <string name="train_review_badge">Révision</string>
+    <string name="train_show_hint">Indice</string>
+    <string name="train_hide_hint">Masquer l’indice</string>
+    <string name="train_answer_label">Ta réponse</string>
+    <string name="train_check">Vérifier</string>
+    <string name="train_next">Exercice suivant</string>
+    <string name="train_see_summary">Voir le bilan</string>
+    <string name="train_correct">Correct !</string>
+    <string name="train_accent_mistake">Presque : vérifie les accents</string>
+    <string name="train_wrong">Pas tout à fait</string>
+    <string name="train_your_answer">Ta réponse :</string>
+    <string name="train_expected">Attendu :</string>
+    <string name="train_spot_hint">Touche le mot qui contient l’erreur.</string>
+    <string name="train_spot_correction">« %1$s » → « %2$s »</string>
+    <string name="train_token_error">Mot fautif</string>
+    <string name="train_token_your_pick">Ton choix</string>
+    <string name="train_no_drills">Pas d’exercice de ce type pour cette règle.</string>
+    <string name="train_switch_mode">Changer de type</string>
+    <string name="summary_title">Session terminée</string>
+    <string name="summary_review_title">Révision terminée</string>
+    <string name="summary_perfect">Sans faute. Passe à la règle suivante !</string>
+    <string name="summary_good">Bon travail. Revois tes erreurs pour les fixer.</string>
+    <string name="summary_keep_going">Relis la règle, puis revois tes erreurs.</string>
+    <string name="summary_mistakes">Tes erreurs</string>
+    <string name="summary_review_mistakes">Revoir mes erreurs (%1$d)</string>
+    <string name="summary_restart">Recommencer</string>
+    <string name="summary_see_rule">Revoir la règle</string>
+    <string name="summary_next_rule">Règle suivante</string>
+
+    <!-- Create -->
+    <string name="gen_hero_title">Crée ton texte</string>
+    <string name="gen_hero_subtitle">Gemini écrit un texte ou un podcast à ton niveau, autour de la règle et du thème choisis.</string>
+    <string name="gen_missing_key_title">Ajoute ta clé Gemini</string>
+    <string name="gen_missing_key_desc">Une clé gratuite est nécessaire pour générer du contenu. Touche ici pour l’ajouter dans les Réglages.</string>
+    <string name="gen_add_key">Ajouter ma clé</string>
+    <string name="gen_rule">Règle</string>
+    <string name="gen_level">Niveau</string>
+    <string name="gen_theme">Thème (facultatif)</string>
+    <string name="gen_theme_hint">ex. le télétravail, un entretien d’embauche…</string>
+    <string name="gen_theme_travel">Voyage</string>
+    <string name="gen_theme_work">Travail</string>
+    <string name="gen_theme_food">Cuisine</string>
+    <string name="gen_theme_city">Ville</string>
+    <string name="gen_theme_nature">Nature</string>
+    <string name="gen_theme_tech">Technologie</string>
+    <string name="gen_theme_family">Famille</string>
+    <string name="gen_default_theme">la vie quotidienne</string>
+    <string name="gen_format">Format</string>
+    <string name="gen_format_text">Texte</string>
+    <string name="gen_format_podcast">Podcast</string>
+    <string name="gen_format_text_desc">Environ une page à lire, avec les passages où la règle apparaît.</string>
+    <string name="gen_format_podcast_desc">Dialogue à deux voix (7 à 8 min), à écouter avec des voix naturelles.</string>
+    <string name="gen_generate">Générer</string>
+    <string name="gen_generating">Génération…</string>
+    <string name="gen_loading_title">Gemini écrit…</string>
+    <string name="gen_loading_text">Un texte prend en général 10 à 20 secondes.</string>
+    <string name="gen_loading_podcast">Un script de podcast prend en général 20 à 40 secondes.</string>
+    <string name="gen_error_title">La génération a échoué</string>
+    <string name="gen_error_no_key">Ajoute ta clé API Gemini dans les Réglages avant de générer du contenu.</string>
+    <string name="gen_result_text">Ton texte</string>
+    <string name="gen_result_podcast">Ton podcast</string>
+    <string name="gen_rule_in_text">Où trouver la règle</string>
+    <string name="gen_saved">Enregistré</string>
+    <string name="gen_regenerate">Régénérer</string>
+    <string name="gen_audio_generate">Générer l’audio</string>
+    <string name="gen_audio_generating">Création des voix…</string>
+    <string name="gen_audio_error">Erreur audio : %1$s</string>
+    <string name="gen_export_audio">Enregistrer dans Téléchargements</string>
+    <string name="gen_library_title">Mes créations (%1$d)</string>
+    <string name="gen_library_empty">Enregistre un texte ou un podcast pour le retrouver ici.</string>
+    <string name="gen_delete_title">Supprimer cette création ?</string>
+    <string name="gen_delete_message">Le texte et son audio seront définitivement supprimés.</string>
+    <string name="export_success">Podcast enregistré dans Téléchargements/FrenchGrammarQuest</string>
+    <string name="export_error">Erreur lors de l’export : %1$s</string>
+    <string name="export_error_missing">Fichier audio introuvable.</string>
+    <string name="export_error_create">Impossible de créer le fichier dans Téléchargements.</string>
+    <string name="export_error_write">Impossible d’écrire le fichier.</string>
+
+    <!-- Index -->
+    <string name="index_count">%1$d règle(s)</string>
+    <string name="index_progress">Saisie %1$d/%2$d · Détection %3$d/%4$d</string>
 </resources>

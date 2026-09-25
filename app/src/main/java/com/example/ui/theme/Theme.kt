@@ -1,6 +1,7 @@
 package com.example.ui.theme
 
 import android.os.Build
+import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.darkColorScheme
 import androidx.compose.material3.dynamicDarkColorScheme
@@ -12,12 +13,22 @@ import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 
-enum class ThemeMode(val title: String) {
-  LIGHT("Clair"),
-  DARK("Sombre")
+/** User's theme preference. [SYSTEM] follows the device's dark-mode setting. */
+enum class ThemeMode {
+  SYSTEM,
+  LIGHT,
+  DARK
 }
 
+/** The resolved theme actually applied: always [ThemeMode.LIGHT] or [ThemeMode.DARK], never SYSTEM. */
 val LocalThemeMode = staticCompositionLocalOf { ThemeMode.DARK }
+
+@Composable
+fun ThemeMode.isDark(): Boolean = when (this) {
+  ThemeMode.SYSTEM -> isSystemInDarkTheme()
+  ThemeMode.LIGHT -> false
+  ThemeMode.DARK -> true
+}
 
 private val DarkColorScheme = darkColorScheme(
   primary = DarkPrimary,
@@ -38,7 +49,13 @@ private val DarkColorScheme = darkColorScheme(
   onSurface = DarkOnSurface,
   surfaceVariant = DarkSurfaceVariant,
   onSurfaceVariant = DarkOnSurfaceVariant,
-  outline = DarkOutline
+  outline = DarkOutline,
+  outlineVariant = DarkOutline,
+  surfaceContainerLowest = DarkBackground,
+  surfaceContainerLow = Color(0xFF111A2C),
+  surfaceContainer = DarkSurface,
+  surfaceContainerHigh = DarkSurfaceVariant,
+  surfaceContainerHighest = Color(0xFF273449)
 )
 
 private val LightColorScheme = lightColorScheme(
@@ -60,16 +77,23 @@ private val LightColorScheme = lightColorScheme(
   onSurface = LightOnSurface,
   surfaceVariant = LightSurfaceVariant,
   onSurfaceVariant = LightOnSurfaceVariant,
-  outline = LightOutline
+  outline = LightOutline,
+  outlineVariant = LightOutline,
+  surfaceContainerLowest = LightSurface,
+  surfaceContainerLow = LightBackground,
+  surfaceContainer = LightSurfaceVariant,
+  surfaceContainerHigh = Color(0xFFEEF2F6),
+  surfaceContainerHighest = LightOutline
 )
 
 @Composable
 fun MyApplicationTheme(
-  themeMode: ThemeMode = ThemeMode.DARK,
+  themeMode: ThemeMode = ThemeMode.SYSTEM,
   dynamicColor: Boolean = false,
   content: @Composable () -> Unit
 ) {
-  val colorScheme = when (themeMode) {
+  val resolvedMode = if (themeMode.isDark()) ThemeMode.DARK else ThemeMode.LIGHT
+  val colorScheme = when (resolvedMode) {
     ThemeMode.LIGHT -> {
       if (dynamicColor && Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
         dynamicLightColorScheme(LocalContext.current)
@@ -77,7 +101,7 @@ fun MyApplicationTheme(
         LightColorScheme
       }
     }
-    ThemeMode.DARK -> {
+    else -> {
       if (dynamicColor && Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
         dynamicDarkColorScheme(LocalContext.current)
       } else {
@@ -86,7 +110,7 @@ fun MyApplicationTheme(
     }
   }
 
-  CompositionLocalProvider(LocalThemeMode provides themeMode) {
+  CompositionLocalProvider(LocalThemeMode provides resolvedMode) {
     MaterialTheme(
       colorScheme = colorScheme,
       typography = Typography,

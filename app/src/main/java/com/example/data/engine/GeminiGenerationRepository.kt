@@ -26,7 +26,7 @@ data class GenerationRequest(
 /**
  * Calls the public Gemini Developer API (generativelanguage.googleapis.com) directly with the
  * user's own Google AI Studio API key — no Firebase project, no server-side key management.
- * The user pastes their key in the Génération tab; it's kept in local SharedPreferences only
+ * The user pastes their key in Settings; it's kept in local SharedPreferences only
  * (see GrammarViewModel.setGeminiApiKey) and sent as a query param on each request, exactly as
  * Google's own REST docs describe.
  *
@@ -47,7 +47,7 @@ class GeminiGenerationRepository {
   suspend fun generate(request: GenerationRequest, apiKey: String): Result<String> = withContext(Dispatchers.IO) {
     runCatching {
       if (apiKey.isBlank()) {
-        throw IllegalStateException("Aucune clé API Gemini renseignée. Ajoute la tienne dans l'onglet Génération.")
+        throw IllegalStateException("Aucune clé API Gemini renseignée. Ajoute la tienne dans les Réglages.")
       }
 
       val prompt = buildPrompt(request)
