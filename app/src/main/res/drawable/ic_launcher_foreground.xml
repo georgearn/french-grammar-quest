@@ -1,0 +1,59 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+
+    <!-- 1. SOFT ELEVATION SHADOW UNDER FRANCE SILHOUETTE -->
+    <path
+        android:fillColor="#33000000"
+        android:pathData="M 55,24.8 C 58,24.8 61,26.8 63.5,29.3 C 66,28.8 69,31.3 71,35.3 C 73,36.8 77,38.3 79,41.3 C 81,43.8 83.5,45.8 83.5,49.3 C 83.5,52.3 81,55.3 80,58.3 C 79,60.3 76,61.3 77,65.3 C 77,67.3 79,70.8 78,73.8 C 76,75.8 73,75.8 71,74.8 C 68,74.8 66,72.8 64,74.8 C 62,76.3 59,77.8 56,77.8 C 53,77.8 49,78.8 45,78.8 C 41,78.8 37,77.8 35,75.8 C 34,73.8 36,69.8 36,64.8 C 36,61.8 34,57.8 35,53.8 C 32,53.8 29,53.8 26,52.8 C 22.5,51.8 22.5,47.3 26,46.3 C 29,45.3 33,46.3 36,44.3 C 37,42.3 38,37.8 39,34.8 C 40,33.8 43,35.8 44,37.8 C 46,37.8 48,34.8 51,34.8 C 53,33.8 53.5,29.3 55,24.8 Z" />
+
+    <!-- 2. FRANCE SILHOUETTE (WARM FRENCH BEIGE) -->
+    <path
+        android:fillColor="#F4ECE1"
+        android:strokeColor="#DECBB3"
+        android:strokeWidth="1.2"
+        android:pathData="M 55,23 C 58,23 61,25 63.5,27.5 C 66,27 69,29.5 71,33.5 C 73,35 77,36.5 79,39.5 C 81,42 83.5,44 83.5,47.5 C 83.5,50.5 81,53.5 80,56.5 C 79,58.5 76,59.5 77,63.5 C 77,65.5 79,69 78,72 C 76,74 73,74 71,73 C 68,73 66,71 64,73 C 62,74.5 59,76 56,76 C 53,76 49,77 45,77 C 41,77 37,76 35,74 C 34,72 36,68 36,63 C 36,60 34,56 35,52 C 32,52 29,52 26,51 C 22.5,50 22.5,45.5 26,44.5 C 29,43.5 33,44.5 36,42.5 C 37,40.5 38,36 39,33 C 40,32 43,34 44,36 C 46,36 48,33 51,33 C 53,32 53.5,27.5 55,23 Z" />
+
+    <!-- 3. FLAG BADGE INSIDE (FRENCH TRICOLOR) -->
+    <!-- Flag Drop Shadow -->
+    <path
+        android:fillColor="#26000000"
+        android:pathData="M 42,42 L 65,42 A 3.5,3.5 0 0,1 68.5,45.5 L 68.5,58.5 A 3.5,3.5 0 0,1 65,62 L 42,62 A 3.5,3.5 0 0,1 38.5,58.5 L 38.5,45.5 A 3.5,3.5 0 0,1 42,42 Z" />
+
+    <!-- Left Stripe: French Navy Blue -->
+    <path
+        android:fillColor="#0055A4"
+        android:pathData="M 42,40.5 L 48.5,40.5 L 48.5,60.5 L 42,60.5 A 3.5,3.5 0 0,1 38.5,57 L 38.5,44 A 3.5,3.5 0 0,1 42,40.5 Z" />
+
+    <!-- Middle Stripe: Crisp White -->
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M 48.5,40.5 L 58.5,40.5 L 58.5,60.5 L 48.5,60.5 Z" />
+
+    <!-- Right Stripe: Vivid French Red -->
+    <path
+        android:fillColor="#EF4135"
+        android:pathData="M 58.5,40.5 L 65,40.5 A 3.5,3.5 0 0,1 68.5,44 L 68.5,57 A 3.5,3.5 0 0,1 65,60.5 L 58.5,60.5 Z" />
+
+    <!-- Flag Inner Dividers between stripes (Icon outline style) -->
+    <path
+        android:strokeColor="#1E293B"
+        android:strokeWidth="1.6"
+        android:pathData="M 48.5,40.5 L 48.5,60.5" />
+
+    <path
+        android:strokeColor="#1E293B"
+        android:strokeWidth="1.6"
+        android:pathData="M 58.5,40.5 L 58.5,60.5" />
+
+    <!-- Flag Outer Border (Clean rounded rectangle frame) -->
+    <path
+        android:fillColor="#00000000"
+        android:strokeColor="#1E293B"
+        android:strokeWidth="2.0"
+        android:pathData="M 42,40.5 L 65,40.5 A 3.5,3.5 0 0,1 68.5,44 L 68.5,57 A 3.5,3.5 0 0,1 65,60.5 L 42,60.5 A 3.5,3.5 0 0,1 38.5,57 L 38.5,44 A 3.5,3.5 0 0,1 42,40.5 Z" />
+
+</vector>

@@ -1,0 +1,6 @@
+{
+  "name": "French Grammar Quest",
+  "description": "Interactive French grammar study tool with two paths: visual exploratory understanding (structural diagrams, multi-register comparisons, annotated texts with audio) and deliberate production drills (typing transformations with accent toolbar and spot-the-error exercises).",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
