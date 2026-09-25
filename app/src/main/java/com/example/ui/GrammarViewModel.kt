@@ -13,6 +13,9 @@ import com.example.R
 import com.example.data.GrammarRepository
 import com.example.data.engine.AnswerChecker
 import com.example.data.engine.AnswerVerdict
+import com.example.data.engine.ForceLayout
+import com.example.data.engine.GrammarMapBuilder
+import com.example.data.engine.MapGraph
 import com.example.data.engine.GeminiGenerationRepository
 import com.example.data.engine.GeminiTtsRepository
 import com.example.data.engine.GenerationFormat
@@ -34,6 +37,10 @@ import com.example.util.FrenchAudioHelper
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
+import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.filterNotNull
+import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.map
@@ -529,6 +536,97 @@ class GrammarViewModel(application: Application) : AndroidViewModel(application)
     podcastPlayer = null
     _isPodcastPlaying.value = false
     _playingSavedAudioPath.value = null
+  }
+
+  // --- GRAMMAR MAP ---
+
+  private val _mapFocus = MutableStateFlow(prefs.mapFocusRuleId)
+  val mapFocus: StateFlow<String?> = _mapFocus.asStateFlow()
+
+  private val ruleIds = rules.map { it.id }.toSet()
+
+  /** Rules on the map (opened in Comprendre, trained, or added from the map). */
+  val mapExploredIds: StateFlow<Set<String>> = repository.ruleVisits
+    .map { visits -> visits.map { it.ruleId }.filter { it in ruleIds }.toSet() }
+    .stateIn(viewModelScope, SharingStarted.Eagerly, emptySet())
+
+  private val masteredIds = repository.ruleTrainingProgress.map { list ->
+    list.filter { progress ->
+      val production = if (progress.bestProductionTotal > 0) progress.bestProductionScore.toFloat() / progress.bestProductionTotal else 0f
+      val spotting = if (progress.bestSpotErrorTotal > 0) progress.bestSpotErrorScore.toFloat() / progress.bestSpotErrorTotal else 0f
+      maxOf(production, spotting) >= GrammarMapBuilder.MASTERY_RATIO
+    }.map { it.ruleId }.toSet()
+  }
+
+  /** Null until the first computation, so the screen can tell "loading" from "empty". */
+  val mapGraph: StateFlow<MapGraph?> = combine(repository.ruleVisits, masteredIds, _mapFocus) { visits, mastered, focus ->
+    GrammarMapBuilder.build(rules, visits.map { it.ruleId }.toSet(), mastered, focus)
+  }
+    .flowOn(Dispatchers.Default)
+    .stateIn(viewModelScope, SharingStarted.Eagerly, null)
+
+  private val positionCache = mutableMapOf<String, Pair<Float, Float>>()
+  private val _mapPositions = MutableStateFlow<Map<String, Pair<Float, Float>>>(emptyMap())
+  /** Node positions in dp around (0, 0), for the nodes of the current [mapGraph]. */
+  val mapPositions: StateFlow<Map<String, Pair<Float, Float>>> = _mapPositions.asStateFlow()
+
+  init {
+    viewModelScope.launch {
+      if (!prefs.mapSeeded) {
+        repository.seedVisitsFromTraining()
+        prefs.mapSeeded = true
+      }
+      positionCache.putAll(repository.mapPositions())
+      mapGraph.filterNotNull().collectLatest { graph ->
+        val ids = graph.nodes.map { it.ruleId }
+        val known = positionCache.filterKeys { it in ids }
+        val laidOut = withContext(Dispatchers.Default) {
+          ForceLayout.layout(ids, graph.edges.map { it.from to it.to }, known)
+        }
+        positionCache.putAll(laidOut)
+        _mapPositions.value = laidOut
+        if (laidOut.keys.any { it !in known }) repository.saveMapPositions(laidOut)
+      }
+    }
+  }
+
+  /** Called whenever a rule is shown in Comprendre: it joins the map and becomes the focus. */
+  fun markVisited(ruleId: String) {
+    if (ruleId !in ruleIds) return
+    viewModelScope.launch { repository.recordVisit(ruleId) }
+    setMapFocus(ruleId)
+  }
+
+  /** Adds a rule to the map without leaving it (ghost node or picker). */
+  fun addToMap(ruleId: String) = markVisited(ruleId)
+
+  fun setMapFocus(ruleId: String?) {
+    _mapFocus.value = ruleId
+    prefs.mapFocusRuleId = ruleId
+  }
+
+  /** The learner dragged a node: keep it where they put it. */
+  fun moveMapNode(ruleId: String, x: Float, y: Float) {
+    positionCache[ruleId] = x to y
+    _mapPositions.update { it + (ruleId to (x to y)) }
+    viewModelScope.launch { repository.saveMapPositions(mapOf(ruleId to (x to y))) }
+  }
+
+  fun resetMap() {
+    viewModelScope.launch {
+      repository.clearMap()
+      positionCache.clear()
+      _mapPositions.value = emptyMap()
+    }
+    setMapFocus(null)
+  }
+
+  /** A few rules not on the map yet, closest to where the learner currently is. */
+  fun mapSuggestions(onMap: Set<String>, count: Int = 3): List<StructuredRule> {
+    val targetLevel = _levelFilter.value ?: _mapFocus.value?.let { ruleById(it).level }
+    val candidates = rules.filter { it.id !in onMap }
+    val sameLevel = candidates.filter { targetLevel == null || it.level == targetLevel }
+    return (sameLevel + candidates).distinct().take(count)
   }
 
   // --- AUDIO LISTENING (FRENCH TTS) ---

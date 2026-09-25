@@ -28,4 +28,26 @@ interface GrammarDao {
 
   @Query("DELETE FROM saved_generations WHERE id = :id")
   suspend fun deleteSavedGeneration(id: Long)
+
+  // Grammar map
+  @Query("SELECT * FROM rule_visit")
+  fun getAllRuleVisits(): Flow<List<RuleVisitEntity>>
+
+  @Query("SELECT * FROM rule_visit WHERE ruleId = :ruleId LIMIT 1")
+  suspend fun getRuleVisit(ruleId: String): RuleVisitEntity?
+
+  @Insert(onConflict = OnConflictStrategy.REPLACE)
+  suspend fun upsertRuleVisit(visit: RuleVisitEntity)
+
+  @Query("DELETE FROM rule_visit")
+  suspend fun clearRuleVisits()
+
+  @Query("SELECT * FROM map_node_position")
+  suspend fun getMapNodePositions(): List<MapNodePositionEntity>
+
+  @Insert(onConflict = OnConflictStrategy.REPLACE)
+  suspend fun upsertMapNodePositions(positions: List<MapNodePositionEntity>)
+
+  @Query("DELETE FROM map_node_position")
+  suspend fun clearMapNodePositions()
 }

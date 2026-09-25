@@ -3,7 +3,7 @@
     <string name="nav_explore">Learn</string>
     <string name="nav_train">Practice</string>
     <string name="nav_create">Create</string>
-    <string name="nav_index">Index</string>
+    <string name="nav_map">Map</string>
     <string name="settings_title">Settings</string>
     <string name="language_show_english">Show English help</string>
     <string name="language_back_to_french">Back to French</string>
@@ -179,4 +179,32 @@
     <!-- Index -->
     <string name="index_count">%1$d rule(s)</string>
     <string name="index_progress">Typing %1$d/%2$d · Spotting %3$d/%4$d</string>
+    <!-- Grammar map -->
+    <string name="map_view_map">Map</string>
+    <string name="map_view_list">List</string>
+    <string name="map_stats">%1$d explored · %2$d to discover</string>
+    <string name="map_description">Grammar map: %1$d rules explored, %2$d to discover. Use the List view to browse them.</string>
+    <string name="map_state_explored">Explored</string>
+    <string name="map_state_mastered">Mastered</string>
+    <string name="map_state_ghost">To discover</string>
+    <string name="map_empty_title">Your map is empty</string>
+    <string name="map_empty_desc">Every rule you open is added here, with the rules linked to it. Pick a first topic to start.</string>
+    <string name="map_empty_cta">Pick a first topic</string>
+    <string name="map_add">Add a topic</string>
+    <string name="map_add_title">Add a topic to your map</string>
+    <string name="map_suggestions">Suggestions</string>
+    <string name="map_already_on_map">On the map</string>
+    <string name="map_recenter">Recenter the map</string>
+    <string name="map_more">More options</string>
+    <string name="map_reset">Clear the map</string>
+    <string name="map_reset_title">Clear your map?</string>
+    <string name="map_reset_message">All explored rules will be removed from the map. Your practice scores are kept.</string>
+    <string name="map_add_to_map">Add to my map</string>
+    <string name="map_open_in_explore">Open in Learn</string>
+    <string name="map_links_to_discover">Links to discover</string>
+    <string name="map_no_links">Every link from this rule is already on your map.</string>
+    <string name="explore_related">Related rules</string>
+    <string name="explore_related_subtitle">To keep exploring</string>
+    <string name="explore_no_related">No direct link for this rule. Add another topic from the map.</string>
+    <string name="explore_show_on_map">Show on the map</string>
 </resources>

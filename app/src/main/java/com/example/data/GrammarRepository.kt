@@ -1,14 +1,48 @@
 package com.example.data
 
 import com.example.data.local.GrammarDao
+import com.example.data.local.MapNodePositionEntity
 import com.example.data.local.RuleTrainingProgressEntity
+import com.example.data.local.RuleVisitEntity
 import com.example.data.local.SavedGenerationEntity
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.first
 
 class GrammarRepository(private val dao: GrammarDao) {
 
   val ruleTrainingProgress: Flow<List<RuleTrainingProgressEntity>> = dao.getAllRuleTrainingProgress()
   val savedGenerations: Flow<List<SavedGenerationEntity>> = dao.getAllSavedGenerations()
+  val ruleVisits: Flow<List<RuleVisitEntity>> = dao.getAllRuleVisits()
+
+  /** Puts [ruleId] on the grammar map (or refreshes its last-seen time). */
+  suspend fun recordVisit(ruleId: String) {
+    val now = System.currentTimeMillis()
+    val existing = dao.getRuleVisit(ruleId)
+    dao.upsertRuleVisit(existing?.copy(lastSeen = now) ?: RuleVisitEntity(ruleId, now, now))
+  }
+
+  /** Rules trained before the map existed count as explored. */
+  suspend fun seedVisitsFromTraining() {
+    dao.getAllRuleTrainingProgress().first()
+      .filter { it.sessionsCompleted > 0 }
+      .forEach { progress ->
+        if (dao.getRuleVisit(progress.ruleId) == null) {
+          dao.upsertRuleVisit(RuleVisitEntity(progress.ruleId, progress.lastTrainedTimestamp, progress.lastTrainedTimestamp))
+        }
+      }
+  }
+
+  suspend fun clearMap() {
+    dao.clearRuleVisits()
+    dao.clearMapNodePositions()
+  }
+
+  suspend fun mapPositions(): Map<String, Pair<Float, Float>> =
+    dao.getMapNodePositions().associate { it.ruleId to (it.x to it.y) }
+
+  suspend fun saveMapPositions(positions: Map<String, Pair<Float, Float>>) {
+    dao.upsertMapNodePositions(positions.map { (id, p) -> MapNodePositionEntity(id, p.first, p.second) })
+  }
 
   /** Records the result of a Training-path drill session against a StructuredRule. */
   suspend fun recordRuleTrainingResult(

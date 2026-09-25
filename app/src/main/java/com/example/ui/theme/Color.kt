@@ -229,3 +229,33 @@ object AppThemeColors {
       else -> FlameOrangeOnContainerDark
     }
 }
+
+/**
+ * One colour per rule family on the grammar map (see RuleGraph.family), from the
+ * Toile de Grammaire palette: deeper tones on light backgrounds, brighter ones on dark.
+ */
+object MapFamilyColors {
+  private val light = mapOf(
+    "cat-nom" to Color(0xFF0088B0),
+    "cat-pronoms" to Color(0xFF7C5CD6),
+    "cat-adv" to Color(0xFFB8860F),
+    "cat-verbes" to Color(0xFFC4266B),
+    "cat-avance" to Color(0xFF1A9C72)
+  )
+  private val dark = mapOf(
+    "cat-nom" to Color(0xFF4FD2F2),
+    "cat-pronoms" to Color(0xFFA992F5),
+    "cat-adv" to Color(0xFFE8B93F),
+    "cat-verbes" to Color(0xFFFF5F9E),
+    "cat-avance" to Color(0xFF4FDBA0)
+  )
+  private val fallbackLight = Color(0xFFC35A12)
+  private val fallbackDark = Color(0xFFFF9A52)
+
+  @Composable
+  @ReadOnlyComposable
+  fun forFamily(family: String): Color = when (LocalThemeMode.current) {
+    ThemeMode.LIGHT -> light[family] ?: fallbackLight
+    else -> dark[family] ?: fallbackDark
+  }
+}

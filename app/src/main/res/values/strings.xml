@@ -5,7 +5,7 @@
     <string name="nav_explore">Comprendre</string>
     <string name="nav_train">S’entraîner</string>
     <string name="nav_create">Créer</string>
-    <string name="nav_index">Index</string>
+    <string name="nav_map">Carte</string>
     <string name="settings_title">Réglages</string>
     <string name="language_show_english">Afficher l’aide en anglais</string>
     <string name="language_back_to_french">Revenir au français</string>
@@ -182,4 +182,32 @@
     <!-- Index -->
     <string name="index_count">%1$d règle(s)</string>
     <string name="index_progress">Saisie %1$d/%2$d · Détection %3$d/%4$d</string>
+    <!-- Grammar map -->
+    <string name="map_view_map">Carte</string>
+    <string name="map_view_list">Liste</string>
+    <string name="map_stats">%1$d explorée(s) · %2$d à découvrir</string>
+    <string name="map_description">Carte de grammaire : %1$d règles explorées, %2$d à découvrir. Utilise la vue Liste pour les parcourir.</string>
+    <string name="map_state_explored">Explorée</string>
+    <string name="map_state_mastered">Maîtrisée</string>
+    <string name="map_state_ghost">À découvrir</string>
+    <string name="map_empty_title">Ta carte est vide</string>
+    <string name="map_empty_desc">Chaque règle que tu ouvres s’ajoute ici, avec les règles qui lui sont liées. Choisis un premier sujet pour commencer.</string>
+    <string name="map_empty_cta">Choisir un premier sujet</string>
+    <string name="map_add">Ajouter un sujet</string>
+    <string name="map_add_title">Ajouter un sujet à ta carte</string>
+    <string name="map_suggestions">Suggestions</string>
+    <string name="map_already_on_map">Sur la carte</string>
+    <string name="map_recenter">Recentrer la carte</string>
+    <string name="map_more">Plus d’options</string>
+    <string name="map_reset">Effacer la carte</string>
+    <string name="map_reset_title">Effacer ta carte ?</string>
+    <string name="map_reset_message">Toutes les règles explorées seront retirées de la carte. Tes scores d’entraînement sont conservés.</string>
+    <string name="map_add_to_map">Ajouter à ma carte</string>
+    <string name="map_open_in_explore">Ouvrir dans Comprendre</string>
+    <string name="map_links_to_discover">Liens à découvrir</string>
+    <string name="map_no_links">Tous les liens de cette règle sont déjà sur ta carte.</string>
+    <string name="explore_related">Règles liées</string>
+    <string name="explore_related_subtitle">Pour continuer à explorer</string>
+    <string name="explore_no_related">Pas de lien direct pour cette règle. Ajoute un autre sujet depuis la carte.</string>
+    <string name="explore_show_on_map">Voir sur la carte</string>
 </resources>

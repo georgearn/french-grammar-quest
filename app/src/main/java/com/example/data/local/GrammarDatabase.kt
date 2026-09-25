@@ -10,9 +10,11 @@ import androidx.sqlite.db.SupportSQLiteDatabase
 @Database(
   entities = [
     RuleTrainingProgressEntity::class,
-    SavedGenerationEntity::class
+    SavedGenerationEntity::class,
+    RuleVisitEntity::class,
+    MapNodePositionEntity::class
   ],
-  version = 4,
+  version = 5,
   exportSchema = false
 )
 abstract class GrammarDatabase : RoomDatabase() {
@@ -35,6 +37,20 @@ abstract class GrammarDatabase : RoomDatabase() {
       }
     }
 
+    /** v5 adds the grammar map: visited rules and saved node positions. */
+    private val MIGRATION_4_5 = object : Migration(4, 5) {
+      override fun migrate(db: SupportSQLiteDatabase) {
+        db.execSQL(
+          "CREATE TABLE IF NOT EXISTS `rule_visit` (`ruleId` TEXT NOT NULL, `firstSeen` INTEGER NOT NULL, " +
+            "`lastSeen` INTEGER NOT NULL, PRIMARY KEY(`ruleId`))"
+        )
+        db.execSQL(
+          "CREATE TABLE IF NOT EXISTS `map_node_position` (`ruleId` TEXT NOT NULL, `x` REAL NOT NULL, " +
+            "`y` REAL NOT NULL, PRIMARY KEY(`ruleId`))"
+        )
+      }
+    }
+
     fun getDatabase(context: Context): GrammarDatabase {
       return INSTANCE ?: synchronized(this) {
         val instance = Room.databaseBuilder(
@@ -42,7 +58,7 @@ abstract class GrammarDatabase : RoomDatabase() {
           GrammarDatabase::class.java,
           "french_grammar_quest.db"
         )
-          .addMigrations(MIGRATION_3_4)
+          .addMigrations(MIGRATION_3_4, MIGRATION_4_5)
           .fallbackToDestructiveMigration()
           .build()
         INSTANCE = instance

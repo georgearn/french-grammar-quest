@@ -49,6 +49,7 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.res.stringResource
@@ -181,21 +182,33 @@ fun RuleSelectorField(
 @Composable
 fun RulePickerSheet(
   rules: List<StructuredRule>,
-  selectedRuleId: String,
+  selectedRuleId: String?,
   levelFilter: String?,
   onLevelFilterChange: (String?) -> Unit,
   onSelectRule: (String) -> Unit,
   onDismiss: () -> Unit,
-  progressMap: Map<String, RuleTrainingProgressEntity> = emptyMap()
+  progressMap: Map<String, RuleTrainingProgressEntity> = emptyMap(),
+  title: String = stringResource(R.string.rule_picker_title),
+  /** When set (grammar map), rules not on the map come first and the others are dimmed. */
+  onMapIds: Set<String>? = null,
+  /** Shown above the list while the search is empty. */
+  suggestions: List<StructuredRule> = emptyList()
 ) {
   val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
   var query by rememberSaveable { mutableStateOf("") }
-  val visibleRules = remember(rules, levelFilter, query) { filterRules(rules, levelFilter, query) }
+  val visibleRules = remember(rules, levelFilter, query, onMapIds) {
+    val filtered = filterRules(rules, levelFilter, query)
+    if (onMapIds == null) filtered else filtered.sortedBy { it.id in onMapIds }
+  }
+  val pick: (String) -> Unit = { id ->
+    onSelectRule(id)
+    onDismiss()
+  }
 
   ModalBottomSheet(onDismissRequest = onDismiss, sheetState = sheetState) {
     Column(modifier = Modifier.padding(horizontal = 16.dp)) {
       Text(
-        text = stringResource(R.string.rule_picker_title),
+        text = title,
         style = MaterialTheme.typography.titleLarge,
         fontWeight = FontWeight.Bold
       )
@@ -204,6 +217,26 @@ fun RulePickerSheet(
       Spacer(Modifier.size(8.dp))
       LevelFilterRow(selected = levelFilter, onSelect = onLevelFilterChange)
       Spacer(Modifier.size(8.dp))
+      if (query.isBlank() && suggestions.isNotEmpty()) {
+        Text(
+          text = stringResource(R.string.map_suggestions),
+          style = MaterialTheme.typography.labelLarge,
+          color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+        Spacer(Modifier.size(4.dp))
+        Row(
+          modifier = Modifier.horizontalScroll(rememberScrollState()),
+          horizontalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+          suggestions.forEach { rule ->
+            androidx.compose.material3.SuggestionChip(
+              onClick = { pick(rule.id) },
+              label = { Text("${rule.level} · ${ruleTitle(rule)}", maxLines = 1, overflow = TextOverflow.Ellipsis) }
+            )
+          }
+        }
+        Spacer(Modifier.size(8.dp))
+      }
     }
     HorizontalDivider()
     if (visibleRules.isEmpty()) {
@@ -218,6 +251,7 @@ fun RulePickerSheet(
         items(visibleRules, key = { it.id }) { rule ->
           val selected = rule.id == selectedRuleId
           val trained = (progressMap[rule.id]?.sessionsCompleted ?: 0) > 0
+          val onMap = onMapIds != null && rule.id in onMapIds
           ListItem(
             headlineContent = {
               Text(
@@ -234,6 +268,11 @@ fun RulePickerSheet(
                   contentDescription = stringResource(R.string.rule_current),
                   tint = MaterialTheme.colorScheme.primary
                 )
+                onMap -> Text(
+                  stringResource(R.string.map_already_on_map),
+                  style = MaterialTheme.typography.labelSmall,
+                  color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
                 trained -> Text(
                   stringResource(R.string.rule_trained),
                   style = MaterialTheme.typography.labelSmall,
@@ -245,10 +284,9 @@ fun RulePickerSheet(
               containerColor = if (selected) MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.4f)
               else MaterialTheme.colorScheme.surface
             ),
-            modifier = Modifier.clickable(role = Role.Button) {
-              onSelectRule(rule.id)
-              onDismiss()
-            }
+            modifier = Modifier
+              .alpha(if (onMap) 0.55f else 1f)
+              .clickable(role = Role.Button) { pick(rule.id) }
           )
         }
       }

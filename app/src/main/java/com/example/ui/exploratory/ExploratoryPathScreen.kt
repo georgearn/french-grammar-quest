@@ -37,6 +37,7 @@ import androidx.compose.material.icons.filled.ChatBubbleOutline
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.ChevronLeft
 import androidx.compose.material.icons.filled.ChevronRight
+import androidx.compose.material.icons.filled.Hub
 import androidx.compose.material.icons.filled.Lightbulb
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.TableChart
@@ -55,6 +56,7 @@ import androidx.compose.material3.PrimaryScrollableTabRow
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Tab
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -78,6 +80,7 @@ import com.example.data.engine.FormulaToken
 import com.example.data.engine.GrammarPillar
 import com.example.data.engine.RegisterExample
 import com.example.data.engine.RegisterType
+import com.example.data.engine.RuleGraph
 import com.example.data.engine.StructuredRule
 import com.example.data.engine.TokenCategory
 import com.example.data.engine.VisualStructure
@@ -102,6 +105,7 @@ fun ExploratoryPathScreen(
   viewModel: GrammarViewModel,
   onTrainRule: (String) -> Unit,
   onCreateForRule: (String) -> Unit,
+  onShowOnMap: (String) -> Unit,
   modifier: Modifier = Modifier
 ) {
   val ruleId by viewModel.exploreRuleId.collectAsStateWithLifecycle()
@@ -124,7 +128,18 @@ fun ExploratoryPathScreen(
     }
   }
 
+  val mapExploredIds by viewModel.mapExploredIds.collectAsStateWithLifecycle()
+  val relatedRules = remember(rule) {
+    (RuleGraph.crossRefs(rule.id) + listOfNotNull(contrastPartner?.id))
+      .distinct()
+      .map(viewModel::ruleById)
+  }
+
+  // Every rule shown here joins the grammar map.
+  LaunchedEffect(rule.id) { viewModel.markVisited(rule.id) }
+
   var showPicker by rememberSaveable { mutableStateOf(false) }
+  var relatedExpanded by rememberSaveable { mutableStateOf(true) }
   var structureExpanded by rememberSaveable { mutableStateOf(true) }
   var examplesExpanded by rememberSaveable { mutableStateOf(false) }
   var passageExpanded by rememberSaveable { mutableStateOf(false) }
@@ -160,6 +175,21 @@ fun ExploratoryPathScreen(
         contrastPartner = contrastPartner,
         onJumpToContrastPartner = viewModel::selectExploreRule
       )
+
+      CollapsibleSection(
+        title = stringResource(R.string.explore_related),
+        subtitle = stringResource(R.string.explore_related_subtitle),
+        icon = Icons.Default.Hub,
+        expanded = relatedExpanded,
+        onToggle = { relatedExpanded = !relatedExpanded }
+      ) {
+        RelatedRulesContent(
+          related = relatedRules,
+          exploredIds = mapExploredIds,
+          onOpenRule = viewModel::selectExploreRule,
+          onShowOnMap = { onShowOnMap(rule.id) }
+        )
+      }
 
       CollapsibleSection(
         title = stringResource(R.string.section_structure),
@@ -282,6 +312,49 @@ private fun ExploreActionBar(onTrain: () -> Unit, onCreate: () -> Unit) {
         Text(stringResource(R.string.explore_create_text))
       }
     }
+  }
+}
+
+/** Linked rules as chips (explored ones filled), plus the way to the grammar map. */
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+private fun RelatedRulesContent(
+  related: List<StructuredRule>,
+  exploredIds: Set<String>,
+  onOpenRule: (String) -> Unit,
+  onShowOnMap: () -> Unit
+) {
+  if (related.isEmpty()) {
+    Text(
+      text = stringResource(R.string.explore_no_related),
+      style = MaterialTheme.typography.bodySmall,
+      color = MaterialTheme.colorScheme.onSurfaceVariant
+    )
+  } else {
+    FlowRow(
+      horizontalArrangement = Arrangement.spacedBy(8.dp),
+      verticalArrangement = Arrangement.spacedBy(4.dp)
+    ) {
+      related.forEach { other ->
+        val explored = other.id in exploredIds
+        FilterChip(
+          selected = explored,
+          onClick = { onOpenRule(other.id) },
+          label = { Text("${other.level} · ${ruleTitle(other)}") },
+          leadingIcon = if (explored) {
+            { Icon(Icons.Default.CheckCircle, contentDescription = null, modifier = Modifier.size(16.dp)) }
+          } else {
+            null
+          }
+        )
+      }
+    }
+  }
+  Spacer(Modifier.height(8.dp))
+  TextButton(onClick = onShowOnMap) {
+    Icon(Icons.Default.Hub, contentDescription = null, modifier = Modifier.size(18.dp))
+    Spacer(Modifier.width(6.dp))
+    Text(stringResource(R.string.explore_show_on_map))
   }
 }
 

@@ -9,7 +9,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
-import androidx.compose.material.icons.automirrored.filled.MenuBook
+import androidx.compose.material.icons.filled.Hub
 import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Lightbulb
@@ -18,7 +18,7 @@ import androidx.compose.material.icons.filled.Translate
 import androidx.compose.material.icons.outlined.AutoAwesome
 import androidx.compose.material.icons.outlined.Edit
 import androidx.compose.material.icons.outlined.Lightbulb
-import androidx.compose.material.icons.automirrored.outlined.MenuBook
+import androidx.compose.material.icons.outlined.Hub
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.FilterChipDefaults
@@ -54,7 +54,7 @@ import com.example.ui.exploratory.ExploratoryPathScreen
 import com.example.ui.generation.GenerationScreen
 import com.example.ui.i18n.isEnglish
 import com.example.ui.onboarding.OnboardingScreen
-import com.example.ui.screens.CodexScreen
+import com.example.ui.map.MapScreen
 import com.example.ui.settings.SettingsScreen
 import com.example.ui.training.TrainingPathScreen
 
@@ -63,7 +63,7 @@ object Routes {
   const val EXPLORE = "explore"
   const val TRAIN = "train"
   const val CREATE = "create"
-  const val INDEX = "index"
+  const val MAP = "map"
   const val SETTINGS = "settings"
 }
 
@@ -77,7 +77,7 @@ enum class TopLevelDestination(
   EXPLORE(Routes.EXPLORE, R.string.nav_explore, Icons.Filled.Lightbulb, Icons.Outlined.Lightbulb),
   TRAIN(Routes.TRAIN, R.string.nav_train, Icons.Filled.Edit, Icons.Outlined.Edit),
   CREATE(Routes.CREATE, R.string.nav_create, Icons.Filled.AutoAwesome, Icons.Outlined.AutoAwesome),
-  INDEX(Routes.INDEX, R.string.nav_index, Icons.AutoMirrored.Filled.MenuBook, Icons.AutoMirrored.Outlined.MenuBook)
+  MAP(Routes.MAP, R.string.nav_map, Icons.Filled.Hub, Icons.Outlined.Hub)
 }
 
 /**
@@ -184,6 +184,10 @@ private fun MainScaffold(viewModel: GrammarViewModel) {
           onCreateForRule = { ruleId ->
             viewModel.prepareGenerationForRule(ruleId)
             navController.navigateToTab(TopLevelDestination.CREATE)
+          },
+          onShowOnMap = { ruleId ->
+            viewModel.setMapFocus(ruleId)
+            navController.navigateToTab(TopLevelDestination.MAP)
           }
         )
       }
@@ -202,8 +206,8 @@ private fun MainScaffold(viewModel: GrammarViewModel) {
           onOpenSettings = { navController.navigate(Routes.SETTINGS) { launchSingleTop = true } }
         )
       }
-      composable(Routes.INDEX) {
-        CodexScreen(
+      composable(Routes.MAP) {
+        MapScreen(
           viewModel = viewModel,
           onExploreRule = { ruleId ->
             viewModel.selectExploreRule(ruleId)

@@ -28,3 +28,19 @@ data class SavedGenerationEntity(
   val audioPath: String? = null, // WAV file in filesDir, only for saved podcasts with synthesized audio
   val createdTimestamp: Long = System.currentTimeMillis()
 )
+
+/** A rule the learner has opened or added to the grammar map; its presence means "on the map". */
+@Entity(tableName = "rule_visit")
+data class RuleVisitEntity(
+  @PrimaryKey val ruleId: String,
+  val firstSeen: Long = System.currentTimeMillis(),
+  val lastSeen: Long = System.currentTimeMillis()
+)
+
+/** Last layout position of a node on the grammar map, so the map keeps its shape between visits. */
+@Entity(tableName = "map_node_position")
+data class MapNodePositionEntity(
+  @PrimaryKey val ruleId: String,
+  val x: Float,
+  val y: Float
+)

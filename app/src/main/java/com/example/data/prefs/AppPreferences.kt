@@ -56,6 +56,16 @@ class AppPreferences(context: Context) {
     get() = prefs.getString(KEY_LEVEL_FILTER, null)
     set(value) = prefs.edit().putString(KEY_LEVEL_FILTER, value).apply()
 
+  /** Rule the grammar map is focused on (shows its same-family neighbours). */
+  var mapFocusRuleId: String?
+    get() = prefs.getString(KEY_MAP_FOCUS, null)
+    set(value) = prefs.edit().putString(KEY_MAP_FOCUS, value).apply()
+
+  /** Whether rules trained before the map existed were already added to it. */
+  var mapSeeded: Boolean
+    get() = prefs.getBoolean(KEY_MAP_SEEDED, false)
+    set(value) = prefs.edit().putBoolean(KEY_MAP_SEEDED, value).apply()
+
   private inline fun <reified E : Enum<E>> enumOrDefault(raw: String?, default: E): E =
     raw?.let { name -> enumValues<E>().firstOrNull { it.name == name } } ?: default
 
@@ -68,5 +78,7 @@ class AppPreferences(context: Context) {
     const val KEY_TRAIN_RULE = "train_rule_id"
     const val KEY_DRILL_MODE = "drill_mode"
     const val KEY_LEVEL_FILTER = "level_filter"
+    const val KEY_MAP_FOCUS = "map_focus_rule_id"
+    const val KEY_MAP_SEEDED = "map_seeded"
   }
 }
