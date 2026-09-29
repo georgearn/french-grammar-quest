@@ -9,7 +9,14 @@ import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
 import org.json.JSONArray
 import org.json.JSONObject
-import java.io.IOException
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.sync.Semaphore
+import kotlinx.coroutines.sync.withPermit
+import java.util.concurrent.atomic.AtomicInteger
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
 import java.util.concurrent.TimeUnit
@@ -35,9 +42,11 @@ class GeminiTtsRepository {
 
   private val client = OkHttpClient.Builder()
     .connectTimeout(20, TimeUnit.SECONDS)
-    .readTimeout(300, TimeUnit.SECONDS) // a 7-8 min two-speaker script takes a while to synthesize
+    // Each request now carries one chunk (~180 words, about a minute of speech), not the whole
+    // 7-8 minute script, so it fits comfortably in these limits.
+    .readTimeout(150, TimeUnit.SECONDS)
     .writeTimeout(60, TimeUnit.SECONDS)
-    .callTimeout(340, TimeUnit.SECONDS)
+    .callTimeout(180, TimeUnit.SECONDS)
     .build()
 
   private val jsonMediaType = "application/json; charset=utf-8".toMediaType()
@@ -47,84 +56,120 @@ class GeminiTtsRepository {
     private const val DEFAULT_SAMPLE_RATE_HZ = 24000
     private const val CHANNELS = 1
     private const val BITS_PER_SAMPLE = 16
+    private const val PARALLEL_REQUESTS = 2
+    private const val GAP_BETWEEN_CHUNKS_MS = 300
   }
+
+  /** A synthesized podcast: the WAV file content and when each turn and word is spoken. */
+  class PodcastAudio(val wav: ByteArray, val timeline: PodcastTimeline)
 
   /**
    * Synthesizes a two-speaker script (lines like "Camille : ..." / "Nadia : ...") into a WAV
-   * byte array, ready to write to a file and play back with MediaPlayer.
+   * with a word timeline. The script is split into chunks of a few turns, synthesized two at a
+   * time, each retried on its own if Gemini is overloaded, then joined back together.
+   * [onProgress] reports finished chunks; failures are [GeminiException]s.
    */
-  suspend fun synthesizeDialogue(
+  suspend fun synthesizePodcast(
     script: String,
-    speaker1: String,
-    speaker2: String,
-    apiKey: String
-  ): Result<ByteArray> = withContext(Dispatchers.IO) {
+    voices: PodcastVoices,
+    apiKey: String,
+    onProgress: (done: Int, total: Int) -> Unit = { _, _ -> },
+    onRetry: (attempt: Int, maxAttempts: Int) -> Unit = { _, _ -> }
+  ): Result<PodcastAudio> = withContext(Dispatchers.IO) {
     runCatching {
-      if (apiKey.isBlank()) {
-        throw IllegalStateException("Aucune clé API Gemini renseignée.")
-      }
+      if (apiKey.isBlank()) throw GeminiException(GeminiErrorKind.INVALID_KEY)
+      val turns = DialogueScript.parse(script)
+      if (turns.isEmpty()) throw GeminiException(GeminiErrorKind.EMPTY, detail = "No dialogue lines found")
+      val speakers = assignVoices(turns.map { it.speaker }.distinct().take(2), voices)
+      val chunks = DialogueScript.chunk(turns)
+      val done = AtomicInteger(0)
+      onProgress(0, chunks.size)
 
-      val url = "https://generativelanguage.googleapis.com/v1beta/models/$MODEL:generateContent?key=$apiKey"
-
-      val promptText =
-        "Lis ce dialogue à voix haute de façon naturelle et expressive, avec deux voix bien " +
-          "distinctes pour les deux locuteurs :\n\n$script"
-
-      val body = JSONObject().apply {
-        put(
-          "contents",
-          JSONArray().put(
-            JSONObject().put(
-              "parts",
-              JSONArray().put(JSONObject().put("text", promptText))
-            )
-          )
-        )
-        put(
-          "generationConfig",
-          JSONObject().apply {
-            put("responseModalities", JSONArray().put("AUDIO"))
-            // Audio output tokens are far more expensive than text tokens (~dozens per second
-            // of speech). Without an explicit high ceiling here, a multi-minute two-speaker
-            // script gets silently cut short mid-audio even though the on-screen script text is
-            // complete — this was the actual cause of "podcast" output feeling too short.
-            put("maxOutputTokens", 32000)
-            put(
-              "speechConfig",
-              JSONObject().put(
-                "multiSpeakerVoiceConfig",
-                JSONObject().put(
-                  "speakerVoiceConfigs",
-                  JSONArray()
-                    .put(speakerVoiceConfig(speaker1, "Kore"))
-                    .put(speakerVoiceConfig(speaker2, "Puck"))
-                )
-              )
-            )
+      val gate = Semaphore(PARALLEL_REQUESTS)
+      val audio = coroutineScope {
+        chunks.map { chunk ->
+          async {
+            gate.withPermit {
+              GeminiHttp.withRetry(maxAttempts = 4, onRetry = onRetry) {
+                requestChunk(chunk, speakers, apiKey)
+              }.also { onProgress(done.incrementAndGet(), chunks.size) }
+            }
           }
-        )
+        }.awaitAll()
       }
 
-      val httpRequest = Request.Builder()
-        .url(url)
-        .post(body.toString().toRequestBody(jsonMediaType))
-        .build()
+      val sampleRate = audio.first().second
+      val gap = ByteArray(sampleRate * GAP_BETWEEN_CHUNKS_MS / 1000 * 2)
+      val pcm = java.io.ByteArrayOutputStream()
+      val timed = mutableListOf<TimedTurn>()
+      audio.forEachIndexed { i, (chunkPcm, rate) ->
+        val offsetMs = pcm.size().toLong() * 1000 / (rate * 2)
+        timed += SpeechAlignment.align(chunkPcm, rate, chunks[i], offsetMs)
+        pcm.write(chunkPcm)
+        if (i < audio.lastIndex) pcm.write(gap)
+      }
+      PodcastAudio(pcmToWav(pcm.toByteArray(), sampleRate), PodcastTimeline(timed))
+    }.recoverCatching { throw if (it is kotlinx.coroutines.CancellationException) it else GeminiHttp.classify(it) }
+  }
 
-      val responseText = client.newCall(httpRequest).execute().use { response ->
-        val raw = response.body?.string().orEmpty()
-        if (!response.isSuccessful) {
-          val apiMessage = runCatching {
-            JSONObject(raw).optJSONObject("error")?.optString("message")
-          }.getOrNull()
-          throw IOException("Erreur Gemini TTS (${response.code}) : ${apiMessage ?: raw.take(200)}")
+  /** One TTS request for a few turns; returns raw PCM and its sample rate. */
+  /**
+   * Gives each speaker of the script its voice: by name when the script uses the expected names,
+   * otherwise in order of appearance.
+   */
+  private fun assignVoices(names: List<String>, voices: PodcastVoices): List<PodcastSpeaker> {
+    val byName = voices.speakers.associateBy { it.name.lowercase() }
+    val unused = voices.speakers.filter { it.name.lowercase() !in names.map(String::lowercase) }.toMutableList()
+    val assigned = names.map { name ->
+      byName[name.lowercase()]?.let { PodcastSpeaker(name, it.voice) }
+        ?: PodcastSpeaker(name, unused.removeAt(0).voice)
+    }
+    // Multi-speaker TTS needs exactly two voices, even if the script only has one speaker.
+    return (assigned + unused).take(2)
+  }
+
+  private suspend fun requestChunk(chunk: List<DialogueTurn>, speakers: List<PodcastSpeaker>, apiKey: String): Pair<ByteArray, Int> {
+    val url = "https://generativelanguage.googleapis.com/v1beta/models/$MODEL:generateContent?key=$apiKey"
+    val dialogue = chunk.joinToString("\n") { "${it.speaker}: ${it.text}" }
+    val promptText =
+      "Lis ce dialogue à voix haute de façon naturelle et expressive, avec deux voix bien " +
+        "distinctes pour les deux locuteurs :\n\n$dialogue"
+
+    val voiceConfigs = JSONArray()
+    speakers.forEach { voiceConfigs.put(speakerVoiceConfig(it.name, it.voice)) }
+
+    val body = JSONObject().apply {
+      put(
+        "contents",
+        JSONArray().put(JSONObject().put("parts", JSONArray().put(JSONObject().put("text", promptText))))
+      )
+      put(
+        "generationConfig",
+        JSONObject().apply {
+          put("responseModalities", JSONArray().put("AUDIO"))
+          // Audio output tokens are far more expensive than text tokens (~dozens per second of
+          // speech). Without a high enough ceiling the audio gets cut short mid-chunk.
+          put("maxOutputTokens", 16000)
+          put(
+            "speechConfig",
+            JSONObject().put("multiSpeakerVoiceConfig", JSONObject().put("speakerVoiceConfigs", voiceConfigs))
+          )
         }
-        raw
+      )
+    }
+
+    val call = client.newCall(
+      Request.Builder().url(url).post(body.toString().toRequestBody(jsonMediaType)).build()
+    )
+    val handle = currentCoroutineContext()[Job]?.invokeOnCompletion { call.cancel() }
+    try {
+      val responseText = call.execute().use { response ->
+        if (!response.isSuccessful) throw GeminiHttp.errorFrom(response)
+        response.body?.string().orEmpty()
       }
-
-      val (pcmBytes, sampleRate) = extractAudio(responseText)
-        ?: throw IllegalStateException("Réponse audio vide de Gemini.")
-
-      pcmToWav(pcmBytes, sampleRate)
+      return extractAudio(responseText) ?: throw GeminiException(GeminiErrorKind.EMPTY)
+    } finally {
+      handle?.dispose()
     }
   }
 

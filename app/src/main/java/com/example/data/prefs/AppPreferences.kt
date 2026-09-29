@@ -66,6 +66,11 @@ class AppPreferences(context: Context) {
     get() = prefs.getBoolean(KEY_MAP_SEEDED, false)
     set(value) = prefs.edit().putBoolean(KEY_MAP_SEEDED, value).apply()
 
+  /** Voices last chosen for podcasts. */
+  var podcastVoices: com.example.data.engine.PodcastVoices
+    get() = enumOrDefault(prefs.getString(KEY_PODCAST_VOICES, null), com.example.data.engine.PodcastVoices.TWO_WOMEN)
+    set(value) = prefs.edit().putString(KEY_PODCAST_VOICES, value.name).apply()
+
   private inline fun <reified E : Enum<E>> enumOrDefault(raw: String?, default: E): E =
     raw?.let { name -> enumValues<E>().firstOrNull { it.name == name } } ?: default
 
@@ -80,5 +85,6 @@ class AppPreferences(context: Context) {
     const val KEY_LEVEL_FILTER = "level_filter"
     const val KEY_MAP_FOCUS = "map_focus_rule_id"
     const val KEY_MAP_SEEDED = "map_seeded"
+    const val KEY_PODCAST_VOICES = "podcast_voices"
   }
 }

@@ -54,6 +54,7 @@ import androidx.compose.material3.FilterChip
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
@@ -66,6 +67,7 @@ import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
@@ -89,6 +91,9 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.example.R
 import com.example.data.engine.GenerationFormat
+import com.example.data.engine.PodcastTimeline
+import com.example.data.engine.PodcastVoices
+import com.example.util.SpokenRange
 import com.example.ui.GrammarViewModel
 import com.example.ui.components.CEFR_LEVELS
 import com.example.ui.components.RulePickerSheet
@@ -103,6 +108,7 @@ data class GenerationForm(
   val level: String,
   val theme: String = "",
   val format: GenerationFormat = GenerationFormat.TEXT,
+  val voices: PodcastVoices = PodcastVoices.TWO_WOMEN,
   /** True while the rule simply mirrors the one open in "Comprendre". */
   val followsExplore: Boolean = true
 )
@@ -118,7 +124,15 @@ data class GenerationUiState(
   val level: String? = null,
   val grammarPointTitle: String? = null,
   val theme: String? = null,
-  val isSaved: Boolean = false
+  val isSaved: Boolean = false,
+  /** Speakers of the generated podcast script; the audio must use the same ones. */
+  val voices: PodcastVoices = PodcastVoices.TWO_WOMEN,
+  /** Shown while Gemini is being retried ("servers busy, retrying 2/3"). */
+  val statusMessage: String? = null,
+  /** Podcast audio chunks done / total while synthesizing. */
+  val audioProgress: Pair<Int, Int>? = null,
+  /** When each word of the synthesized podcast is spoken, for highlighting. */
+  val podcastTimeline: PodcastTimeline? = null
 )
 
 data class SavedGenerationUi(
@@ -149,8 +163,8 @@ fun GenerationScreen(
   val saved by viewModel.savedGenerations.collectAsStateWithLifecycle()
   val levelFilter by viewModel.levelFilter.collectAsStateWithLifecycle()
   val isSpeaking by viewModel.isSpeaking.collectAsStateWithLifecycle()
-  val isPodcastPlaying by viewModel.isPodcastPlaying.collectAsStateWithLifecycle()
-  val playingSavedAudioPath by viewModel.playingSavedAudioPath.collectAsStateWithLifecycle()
+  val playback by viewModel.playback.collectAsStateWithLifecycle()
+  val spokenRange by viewModel.spokenRange.collectAsStateWithLifecycle()
   val rule = viewModel.ruleById(form.ruleId)
   var showPicker by rememberSaveable { mutableStateOf(false) }
   // The text field owns its text (synchronous updates keep the cursor stable); the ViewModel gets a copy.
@@ -212,6 +226,10 @@ fun GenerationScreen(
 
       FieldLabel(stringResource(R.string.gen_format))
       FormatSelector(format = form.format, onSelect = { f -> viewModel.updateGenerationForm { it.copy(format = f) } })
+      if (form.format == GenerationFormat.PODCAST_SCRIPT) {
+        FieldLabel(stringResource(R.string.gen_voices))
+        VoicesSelector(voices = form.voices, onSelect = viewModel::setPodcastVoices)
+      }
 
       Spacer(Modifier.height(4.dp))
       if (apiKey.isBlank()) {
@@ -249,31 +267,35 @@ fun GenerationScreen(
 
     // --- Result ---
     when {
-      state.isLoading -> LoadingCard(state.format ?: form.format)
       state.error != null -> ErrorCard(message = state.error.orEmpty(), onRetry = viewModel::generateContent, onDismiss = viewModel::dismissGeneration)
+      // While streaming, the text grows inside the result card; actions appear once it's complete.
       state.resultText != null -> ResultCard(
         state = state,
         text = state.resultText.orEmpty(),
+        isStreaming = state.isLoading,
         isSpeaking = isSpeaking,
-        isPodcastPlaying = isPodcastPlaying,
+        spokenRange = spokenRange,
+        playback = playback,
         onSpeak = viewModel::speakFrench,
         onStopSpeaking = viewModel::stopAudio,
         onSave = viewModel::saveCurrentGeneration,
         onRegenerate = viewModel::generateContent,
         onClose = viewModel::dismissGeneration,
         onSynthesizeAudio = viewModel::synthesizePodcastAudio,
-        onPlayAudio = viewModel::playPodcastAudio,
-        onStopAudio = viewModel::stopPodcastAudio,
+        onTogglePlayback = viewModel::togglePlayback,
+        onSeek = viewModel::seekPlayback,
         onExportAudio = viewModel::exportAudioToDevice
       )
+      state.isLoading -> LoadingCard(state.format ?: form.format, state.statusMessage)
     }
 
     // --- Library ---
     Library(
       items = saved,
-      playingAudioPath = playingSavedAudioPath,
-      onPlayAudio = viewModel::playSavedAudio,
-      onStopAudio = viewModel::stopPodcastAudio,
+      playback = playback,
+      loadTimeline = viewModel::timelineFor,
+      onTogglePlayback = viewModel::togglePlayback,
+      onSeek = viewModel::seekPlayback,
       onExportAudio = viewModel::exportAudioToDevice,
       onDelete = viewModel::deleteSavedGeneration
     )
@@ -423,8 +445,32 @@ private fun FormatSelector(format: GenerationFormat, onSelect: (GenerationFormat
   )
 }
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun LoadingCard(format: GenerationFormat) {
+private fun VoicesSelector(voices: PodcastVoices, onSelect: (PodcastVoices) -> Unit) {
+  val options = listOf(
+    PodcastVoices.TWO_WOMEN to R.string.gen_voices_two_women,
+    PodcastVoices.TWO_MEN to R.string.gen_voices_two_men,
+    PodcastVoices.WOMAN_AND_MAN to R.string.gen_voices_mixed
+  )
+  SingleChoiceSegmentedButtonRow(modifier = Modifier.fillMaxWidth()) {
+    options.forEachIndexed { index, (option, label) ->
+      SegmentedButton(
+        selected = voices == option,
+        onClick = { onSelect(option) },
+        shape = SegmentedButtonDefaults.itemShape(index, options.size)
+      ) { Text(stringResource(label), maxLines = 1) }
+    }
+  }
+  Text(
+    "${voices.first.name} & ${voices.second.name}",
+    style = MaterialTheme.typography.bodySmall,
+    color = MaterialTheme.colorScheme.onSurfaceVariant
+  )
+}
+
+@Composable
+private fun LoadingCard(format: GenerationFormat, statusMessage: String?) {
   FormCard {
     Row(verticalAlignment = Alignment.CenterVertically) {
       CircularProgressIndicator(modifier = Modifier.size(24.dp), strokeWidth = 3.dp)
@@ -432,7 +478,7 @@ private fun LoadingCard(format: GenerationFormat) {
       Column {
         Text(stringResource(R.string.gen_loading_title), style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold)
         Text(
-          stringResource(if (format == GenerationFormat.TEXT) R.string.gen_loading_text else R.string.gen_loading_podcast),
+          statusMessage ?: stringResource(if (format == GenerationFormat.TEXT) R.string.gen_loading_text else R.string.gen_loading_podcast),
           style = MaterialTheme.typography.bodySmall,
           color = MaterialTheme.colorScheme.onSurfaceVariant
         )
@@ -473,20 +519,24 @@ private fun ErrorCard(message: String, onRetry: () -> Unit, onDismiss: () -> Uni
 private fun ResultCard(
   state: GenerationUiState,
   text: String,
+  isStreaming: Boolean,
   isSpeaking: Boolean,
-  isPodcastPlaying: Boolean,
+  spokenRange: SpokenRange?,
+  playback: PlaybackState,
   onSpeak: (String) -> Unit,
   onStopSpeaking: () -> Unit,
   onSave: () -> Unit,
   onRegenerate: () -> Unit,
   onClose: () -> Unit,
   onSynthesizeAudio: (String) -> Unit,
-  onPlayAudio: (String) -> Unit,
-  onStopAudio: () -> Unit,
+  onTogglePlayback: (String) -> Unit,
+  onSeek: (String, Long) -> Unit,
   onExportAudio: (String) -> Unit
 ) {
   val isPodcast = state.format == GenerationFormat.PODCAST_SCRIPT
   val (body, notes) = remember(text) { splitNotes(text) }
+  val audioPath = state.podcastAudioPath
+  val timeline = state.podcastTimeline
 
   Card(
     modifier = Modifier.fillMaxWidth().testTag("generation_result"),
@@ -509,56 +559,70 @@ private fun ResultCard(
             fontWeight = FontWeight.Bold
           )
           Text(
-            listOfNotNull(state.level, state.grammarPointTitle, state.theme).joinToString(" · "),
+            if (isStreaming) stringResource(R.string.gen_loading_title)
+            else listOfNotNull(state.level, state.grammarPointTitle, state.theme).joinToString(" · "),
             style = MaterialTheme.typography.labelMedium,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             maxLines = 2,
             overflow = TextOverflow.Ellipsis
           )
         }
+        if (isStreaming) {
+          CircularProgressIndicator(modifier = Modifier.size(20.dp), strokeWidth = 2.dp)
+        }
         IconButton(onClick = onClose) {
           Icon(Icons.Default.Close, contentDescription = stringResource(R.string.action_close))
         }
       }
 
-      Spacer(Modifier.height(10.dp))
-      ResultActions(
-        text = text,
-        isSaved = state.isSaved,
-        listenButton = {
-          if (!isPodcast) {
-            FilledTonalButton(onClick = { if (isSpeaking) onStopSpeaking() else onSpeak(body) }) {
-              Icon(if (isSpeaking) Icons.Default.Pause else Icons.AutoMirrored.Filled.VolumeUp, contentDescription = null, modifier = Modifier.size(18.dp))
-              Spacer(Modifier.width(6.dp))
-              Text(stringResource(if (isSpeaking) R.string.action_stop else R.string.action_listen))
-            }
-          }
-        },
-        onSave = onSave,
-        onRegenerate = onRegenerate
-      )
-
-      if (isPodcast) {
+      if (!isStreaming) {
         Spacer(Modifier.height(10.dp))
-        PodcastAudioRow(
-          state = state,
-          script = text,
-          isPlaying = isPodcastPlaying,
-          onSynthesize = onSynthesizeAudio,
-          onPlay = onPlayAudio,
-          onStop = onStopAudio,
-          onExport = onExportAudio
+        ResultActions(
+          text = text,
+          isSaved = state.isSaved,
+          listenButton = {
+            if (!isPodcast) {
+              FilledTonalButton(onClick = { if (isSpeaking) onStopSpeaking() else onSpeak(body) }) {
+                Icon(if (isSpeaking) Icons.Default.Pause else Icons.AutoMirrored.Filled.VolumeUp, contentDescription = null, modifier = Modifier.size(18.dp))
+                Spacer(Modifier.width(6.dp))
+                Text(stringResource(if (isSpeaking) R.string.action_stop else R.string.action_listen))
+              }
+            }
+          },
+          onSave = onSave,
+          onRegenerate = onRegenerate
         )
+
+        if (isPodcast) {
+          Spacer(Modifier.height(10.dp))
+          PodcastAudioRow(
+            state = state,
+            script = text,
+            playback = playback,
+            onSynthesize = onSynthesizeAudio,
+            onToggle = onTogglePlayback,
+            onSeek = onSeek,
+            onExport = onExportAudio
+          )
+        }
       }
 
       HorizontalDivider(Modifier.padding(vertical = 14.dp))
-      Text(
-        text = if (isPodcast) podcastScript(body) else AnnotatedString(body),
-        style = MaterialTheme.typography.bodyLarge,
-        color = MaterialTheme.colorScheme.onSurface
-      )
+      when {
+        isPodcast && audioPath != null && timeline != null -> PodcastTranscript(
+          timeline = timeline,
+          positionMs = playback.positionMs.takeIf { playback.path == audioPath },
+          isPlaying = playback.isPlaying && playback.path == audioPath,
+          onSeek = { ms -> onSeek(audioPath, ms) }
+        )
+        else -> Text(
+          text = if (isPodcast) podcastScript(body) else highlightSpoken(body, spokenRange),
+          style = MaterialTheme.typography.bodyLarge,
+          color = MaterialTheme.colorScheme.onSurface
+        )
+      }
 
-      if (notes.isNotBlank()) {
+      if (notes.isNotBlank() && !isStreaming) {
         Spacer(Modifier.height(16.dp))
         Surface(shape = RoundedCornerShape(12.dp), color = MaterialTheme.colorScheme.surfaceVariant) {
           Column(modifier = Modifier.padding(14.dp).fillMaxWidth()) {
@@ -620,25 +684,36 @@ private fun ActionIcon(icon: ImageVector, label: String, enabled: Boolean = true
 private fun PodcastAudioRow(
   state: GenerationUiState,
   script: String,
-  isPlaying: Boolean,
+  playback: PlaybackState,
   onSynthesize: (String) -> Unit,
-  onPlay: (String) -> Unit,
-  onStop: () -> Unit,
+  onToggle: (String) -> Unit,
+  onSeek: (String, Long) -> Unit,
   onExport: (String) -> Unit
 ) {
   val audioPath = state.podcastAudioPath
   when {
-    state.isSynthesizingAudio -> Row(verticalAlignment = Alignment.CenterVertically) {
-      CircularProgressIndicator(modifier = Modifier.size(18.dp), strokeWidth = 2.dp)
-      Spacer(Modifier.width(10.dp))
-      Text(stringResource(R.string.gen_audio_generating), style = MaterialTheme.typography.bodySmall)
+    state.isSynthesizingAudio -> Column {
+      Row(verticalAlignment = Alignment.CenterVertically) {
+        CircularProgressIndicator(modifier = Modifier.size(18.dp), strokeWidth = 2.dp)
+        Spacer(Modifier.width(10.dp))
+        AudioProgressText(state.audioProgress, state.statusMessage)
+      }
+      state.audioProgress?.let { (done, total) ->
+        Spacer(Modifier.height(8.dp))
+        LinearProgressIndicator(
+          progress = { if (total == 0) 0f else done.toFloat() / total },
+          modifier = Modifier.fillMaxWidth()
+        )
+      }
     }
     audioPath != null -> Row(verticalAlignment = Alignment.CenterVertically) {
-      FilledTonalButton(onClick = { if (isPlaying) onStop() else onPlay(audioPath) }) {
-        Icon(if (isPlaying) Icons.Default.Pause else Icons.Default.PlayArrow, contentDescription = null, modifier = Modifier.size(18.dp))
-        Spacer(Modifier.width(6.dp))
-        Text(stringResource(if (isPlaying) R.string.action_stop else R.string.action_listen))
-      }
+      PodcastPlayerControls(
+        path = audioPath,
+        playback = playback,
+        onToggle = onToggle,
+        onSeek = onSeek,
+        modifier = Modifier.weight(1f)
+      )
       ActionIcon(Icons.Default.Download, stringResource(R.string.gen_export_audio)) { onExport(audioPath) }
     }
     else -> FilledTonalButton(onClick = { onSynthesize(script) }) {
@@ -654,15 +729,23 @@ private fun PodcastAudioRow(
       color = AppThemeColors.red,
       modifier = Modifier.padding(top = 6.dp)
     )
+    if (!state.isSynthesizingAudio && audioPath == null) {
+      TextButton(onClick = { onSynthesize(script) }) {
+        Icon(Icons.Default.Refresh, contentDescription = null, modifier = Modifier.size(18.dp))
+        Spacer(Modifier.width(6.dp))
+        Text(stringResource(R.string.action_retry))
+      }
+    }
   }
 }
 
 @Composable
 private fun Library(
   items: List<SavedGenerationUi>,
-  playingAudioPath: String?,
-  onPlayAudio: (String) -> Unit,
-  onStopAudio: () -> Unit,
+  playback: PlaybackState,
+  loadTimeline: suspend (String) -> PodcastTimeline?,
+  onTogglePlayback: (String) -> Unit,
+  onSeek: (String, Long) -> Unit,
   onExportAudio: (String) -> Unit,
   onDelete: (Long) -> Unit
 ) {
@@ -724,21 +807,43 @@ private fun Library(
             )
           }
           if (item.audioPath != null) {
-            val playing = playingAudioPath == item.audioPath
+            val playing = playback.path == item.audioPath && playback.isPlaying
             ActionIcon(
               if (playing) Icons.Default.Pause else Icons.Default.PlayArrow,
-              stringResource(if (playing) R.string.action_stop else R.string.action_listen)
-            ) { if (playing) onStopAudio() else onPlayAudio(item.audioPath) }
+              stringResource(if (playing) R.string.action_pause else R.string.action_listen)
+            ) {
+              // Opening the card shows the transcript that follows the audio.
+              expanded = true
+              onTogglePlayback(item.audioPath)
+            }
           }
           ActionIcon(Icons.Default.Delete, stringResource(R.string.action_delete)) { pendingDelete = item.id }
         }
         Spacer(Modifier.height(8.dp))
-        Text(
-          item.text,
-          style = MaterialTheme.typography.bodyMedium,
-          maxLines = if (expanded) Int.MAX_VALUE else 3,
-          overflow = TextOverflow.Ellipsis
-        )
+        val audioPath = item.audioPath
+        val timeline by produceState<PodcastTimeline?>(null, audioPath, expanded) {
+          value = if (expanded && audioPath != null) loadTimeline(audioPath) else null
+        }
+        val currentTimeline = timeline
+        if (expanded && audioPath != null) {
+          PodcastPlayerControls(path = audioPath, playback = playback, onToggle = onTogglePlayback, onSeek = onSeek)
+          Spacer(Modifier.height(8.dp))
+        }
+        if (expanded && audioPath != null && currentTimeline != null) {
+          PodcastTranscript(
+            timeline = currentTimeline,
+            positionMs = playback.positionMs.takeIf { playback.path == audioPath },
+            isPlaying = playback.isPlaying && playback.path == audioPath,
+            onSeek = { ms -> onSeek(audioPath, ms) }
+          )
+        } else {
+          Text(
+            item.text,
+            style = MaterialTheme.typography.bodyMedium,
+            maxLines = if (expanded) Int.MAX_VALUE else 3,
+            overflow = TextOverflow.Ellipsis
+          )
+        }
         AnimatedVisibility(visible = expanded) {
           Column {
             Spacer(Modifier.height(8.dp))

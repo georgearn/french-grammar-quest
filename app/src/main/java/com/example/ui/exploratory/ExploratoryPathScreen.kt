@@ -85,6 +85,8 @@ import com.example.data.engine.StructuredRule
 import com.example.data.engine.TokenCategory
 import com.example.data.engine.VisualStructure
 import com.example.ui.GrammarViewModel
+import com.example.ui.generation.highlightSpoken
+import com.example.util.SpokenRange
 import com.example.ui.components.CollapsibleSection
 import com.example.ui.components.EnglishHelpText
 import com.example.ui.components.RulePickerSheet
@@ -111,6 +113,7 @@ fun ExploratoryPathScreen(
   val ruleId by viewModel.exploreRuleId.collectAsStateWithLifecycle()
   val levelFilter by viewModel.levelFilter.collectAsStateWithLifecycle()
   val isSpeaking by viewModel.isSpeaking.collectAsStateWithLifecycle()
+  val spokenRange by viewModel.spokenRange.collectAsStateWithLifecycle()
   val progressMap by viewModel.ruleTrainingProgressMap.collectAsStateWithLifecycle()
   val rule = viewModel.ruleById(ruleId)
 
@@ -223,6 +226,7 @@ fun ExploratoryPathScreen(
         ContextualPassageContent(
           rule = rule,
           isSpeaking = isSpeaking,
+          spokenRange = spokenRange,
           onSpeakFrench = viewModel::speakFrench,
           onStopAudio = viewModel::stopAudio
         )
@@ -819,6 +823,7 @@ private fun RegisterExamplesContent(examples: List<RegisterExample>, ruleId: Str
 private fun ContextualPassageContent(
   rule: StructuredRule,
   isSpeaking: Boolean,
+  spokenRange: SpokenRange?,
   onSpeakFrench: (String) -> Unit,
   onStopAudio: () -> Unit
 ) {
@@ -845,7 +850,7 @@ private fun ContextualPassageContent(
   ) {
     Column(modifier = Modifier.padding(16.dp)) {
       Text(
-        text = passage.fullTextFr,
+        text = highlightSpoken(passage.fullTextFr, spokenRange),
         style = MaterialTheme.typography.bodyLarge,
         color = MaterialTheme.colorScheme.onSurface
       )

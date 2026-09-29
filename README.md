@@ -11,7 +11,7 @@ The app has four tabs. On first launch it asks which mode to open on: *Comprendr
 **Comprendre (Learn)**
 - Pick a rule from a searchable list with CEFR level filters, or step through rules in order.
 - Each rule has an overview, its trigger phrase and a contrasting rule when one exists.
-- Collapsible sections show the sentence structure (formula, decision steps, comparison table), examples by register and an annotated text you can listen to.
+- Collapsible sections show the sentence structure (formula, decision steps, comparison table), examples by register and an annotated text you can listen to. The word being read by the device voice is highlighted.
 - "Règles liées" lists related rules and links to the grammar map.
 
 **S'entraîner (Practice)**
@@ -23,7 +23,10 @@ The app has four tabs. On first launch it asks which mode to open on: *Comprendr
 
 **Créer (Create)**
 - Gemini writes a French text (about one page) or a two-voice podcast script, built around a chosen rule, CEFR level and theme.
-- Podcast scripts can be turned into audio with two natural voices, then exported to *Downloads/FrenchGrammarQuest*.
+- Text streams in as Gemini writes it, so long podcast scripts don't hit a read timeout.
+- Podcast scripts can be turned into audio with two natural voices, then exported to *Downloads/FrenchGrammarQuest*. The audio is synthesized in chunks of a few turns, each retried on its own.
+- While a podcast plays, the transcript follows along: the current line is tinted and the current word highlighted. Tap a line to play from there. Gemini's TTS returns no timestamps, so word timing is estimated from the pauses in the audio and the length of each word.
+- Overloaded (503) and rate-limited (429) calls are retried automatically with backoff. Errors that remain are shown as plain messages, such as "Gemini's servers are experiencing high demand".
 - Results can be listened to, saved, copied, shared or regenerated. Saved items are listed under "Mes créations".
 
 **Carte (Map)**
@@ -54,7 +57,7 @@ Release builds are signed with `my-upload-key.jks` at the repository root, or wi
 ./gradlew test
 ```
 
-The unit tests in `app/src/test` cover answer checking (`AnswerCheckerTest`) and the construction and layout of the grammar map (`GrammarMapTest`).
+The unit tests in `app/src/test` cover answer checking (`AnswerCheckerTest`), the construction and layout of the grammar map (`GrammarMapTest`), and podcast script parsing, audio alignment and Gemini retries (`PodcastTimelineTest`).
 
 ## Project structure
 

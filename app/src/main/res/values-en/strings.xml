@@ -179,6 +179,25 @@
     <!-- Index -->
     <string name="index_count">%1$d rule(s)</string>
     <string name="index_progress">Typing %1$d/%2$d · Spotting %3$d/%4$d</string>
+    <string name="action_pause">Pause</string>
+    <string name="gen_retrying">Gemini servers are busy. Retrying (%1$d/%2$d)…</string>
+    <string name="gen_audio_progress">Creating the voices… part %1$d of %2$d</string>
+    <string name="gen_error_overloaded">Gemini’s servers are experiencing high demand right now. This isn’t a problem with the app: please retry in a few moments.</string>
+    <string name="gen_error_rate_limited">Your key reached its per-minute request limit. Wait a minute, then try again.</string>
+    <string name="gen_error_daily_quota">Your key reached its daily quota. Try again tomorrow or use another key.</string>
+    <string name="gen_error_invalid_key">Gemini rejected the API key. Check it in Settings.</string>
+    <string name="gen_error_model">This Gemini model is no longer available. Update the app.</string>
+    <string name="gen_error_server">Gemini server error (%1$d). Try again in a few moments.</string>
+    <string name="gen_error_timeout">Gemini took too long to answer. Try again.</string>
+    <string name="gen_error_network">No internet connection. Check your connection, then try again.</string>
+    <string name="gen_error_blocked">Gemini refused to generate this content. Try another theme.</string>
+    <string name="gen_error_empty">Gemini returned nothing. Try again.</string>
+
+    <string name="gen_voices">Voices</string>
+    <string name="gen_voices_two_women">2 women</string>
+    <string name="gen_voices_two_men">2 men</string>
+    <string name="gen_voices_mixed">Woman and man</string>
+
     <!-- Grammar map -->
     <string name="map_view_map">Map</string>
     <string name="map_view_list">List</string>

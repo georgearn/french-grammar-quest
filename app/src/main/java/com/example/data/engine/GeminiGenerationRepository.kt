@@ -1,6 +1,8 @@
 package com.example.data.engine
 
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.withContext
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
@@ -8,7 +10,6 @@ import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
 import org.json.JSONArray
 import org.json.JSONObject
-import java.io.IOException
 import java.util.concurrent.TimeUnit
 
 enum class GenerationFormat {
@@ -16,109 +17,152 @@ enum class GenerationFormat {
   PODCAST_SCRIPT  // Script de "podcast" à deux voix, lu ensuite via la synthèse vocale de l'appareil
 }
 
+/** A podcast speaker: the name used in the script and the Gemini TTS voice that reads it. */
+data class PodcastSpeaker(val name: String, val voice: String)
+
+/**
+ * Who speaks in a podcast. Kore + Puck is the original pairing, heard as two women. Gemini does
+ * not label its prebuilt voices by gender; the men's voices below were picked by ear and can be
+ * swapped here without touching anything else.
+ */
+enum class PodcastVoices(val first: PodcastSpeaker, val second: PodcastSpeaker) {
+  TWO_WOMEN(PodcastSpeaker("Camille", "Kore"), PodcastSpeaker("Nadia", "Puck")),
+  TWO_MEN(PodcastSpeaker("Julien", "Charon"), PodcastSpeaker("Karim", "Orus")),
+  WOMAN_AND_MAN(PodcastSpeaker("Camille", "Kore"), PodcastSpeaker("Julien", "Charon"));
+
+  val speakers: List<PodcastSpeaker> get() = listOf(first, second)
+}
+
 data class GenerationRequest(
   val level: String,
   val grammarPointTitle: String,
   val theme: String,
-  val format: GenerationFormat
+  val format: GenerationFormat,
+  val voices: PodcastVoices = PodcastVoices.TWO_WOMEN
 )
 
 /**
  * Calls the public Gemini Developer API (generativelanguage.googleapis.com) directly with the
  * user's own Google AI Studio API key — no Firebase project, no server-side key management.
- * The user pastes their key in Settings; it's kept in local SharedPreferences only
- * (see GrammarViewModel.setGeminiApiKey) and sent as a query param on each request, exactly as
- * Google's own REST docs describe.
+ * The key is kept in local SharedPreferences only (see AppPreferences.geminiApiKey).
  *
- * NOTE: there is no bundled cloud text-to-speech/audio generation here. "Podcast" means a
- * generated dialogue script targeting ~5 minutes of spoken content; playback reuses the
- * device's own French TTS voice (see FrenchAudioHelper), the same one already used to read
- * contextual passages in Exploration mode.
+ * Uses the streaming endpoint (server-sent events): text arrives as it is written, so a long
+ * podcast script never sits silent long enough to hit a read timeout, and the screen can show
+ * the text growing instead of a spinner. Overloaded or rate-limited calls are retried with
+ * backoff as long as nothing has been received yet.
  */
 class GeminiGenerationRepository {
 
   private val client = OkHttpClient.Builder()
     .connectTimeout(20, TimeUnit.SECONDS)
-    .readTimeout(60, TimeUnit.SECONDS)
+    // Time allowed between two chunks, not for the whole answer: the model "thinks" before the
+    // first chunk, which can take a while for a 1,000-word script.
+    .readTimeout(120, TimeUnit.SECONDS)
     .build()
 
   private val jsonMediaType = "application/json; charset=utf-8".toMediaType()
 
-  suspend fun generate(request: GenerationRequest, apiKey: String): Result<String> = withContext(Dispatchers.IO) {
+  /**
+   * Generates the text for [request], calling [onPartial] with the text received so far as it
+   * streams in, and [onRetry] before each automatic retry. Failures are [GeminiException]s.
+   */
+  suspend fun generate(
+    request: GenerationRequest,
+    apiKey: String,
+    onPartial: (String) -> Unit = {},
+    onRetry: (attempt: Int, maxAttempts: Int) -> Unit = { _, _ -> }
+  ): Result<String> = withContext(Dispatchers.IO) {
     runCatching {
-      if (apiKey.isBlank()) {
-        throw IllegalStateException("Aucune clé API Gemini renseignée. Ajoute la tienne dans les Réglages.")
+      if (apiKey.isBlank()) throw GeminiException(GeminiErrorKind.INVALID_KEY)
+      val body = requestBody(buildPrompt(request))
+      GeminiHttp.withRetry(onRetry = onRetry) {
+        streamOnce(body, apiKey, onPartial)
       }
+    }.recoverCatching { throw if (it is kotlinx.coroutines.CancellationException) it else GeminiHttp.classify(it) }
+  }
 
-      val prompt = buildPrompt(request)
-      val model = "gemini-3.6-flash"
-      val url = "https://generativelanguage.googleapis.com/v1beta/models/$model:generateContent?key=$apiKey"
-
-      val body = JSONObject().apply {
-        put(
-          "contents",
-          JSONArray().put(
-            JSONObject().put(
-              "parts",
-              JSONArray().put(JSONObject().put("text", prompt))
-            )
-          )
+  private fun requestBody(prompt: String): String = JSONObject().apply {
+    put(
+      "contents",
+      JSONArray().put(
+        JSONObject().put(
+          "parts",
+          JSONArray().put(JSONObject().put("text", prompt))
         )
-        put(
-          "generationConfig",
-          JSONObject().apply {
-            put("temperature", 0.85)
-            // gemini-3.6-flash is a reasoning model: "thought" tokens count against
-            // maxOutputTokens before any visible text is produced. A low ceiling silently
-            // truncates the response mid-sentence — this happened twice, once for plain text
-            // and again for the longer podcast script (950-1100 words needs more headroom).
-            // thinkingLevel "low" keeps most of the budget for actual output text.
-            put("maxOutputTokens", 16384)
-            put("thinkingConfig", JSONObject().put("thinkingLevel", "low"))
+      )
+    )
+    put(
+      "generationConfig",
+      JSONObject().apply {
+        put("temperature", 0.85)
+        // gemini-3.6-flash is a reasoning model: "thought" tokens count against
+        // maxOutputTokens before any visible text is produced. A low ceiling silently
+        // truncates the response mid-sentence — this happened twice, once for plain text
+        // and again for the longer podcast script (950-1100 words needs more headroom).
+        // thinkingLevel "low" keeps most of the budget for actual output text.
+        put("maxOutputTokens", 16384)
+        put("thinkingConfig", JSONObject().put("thinkingLevel", "low"))
+      }
+    )
+  }.toString()
+
+  private suspend fun streamOnce(body: String, apiKey: String, onPartial: (String) -> Unit): String {
+    val url = "https://generativelanguage.googleapis.com/v1beta/models/$MODEL:streamGenerateContent?alt=sse&key=$apiKey"
+    val call = client.newCall(
+      Request.Builder().url(url).post(body.toRequestBody(jsonMediaType)).build()
+    )
+    // Cancelling the coroutine (new generation, screen closed) aborts the HTTP call too.
+    val job = currentCoroutineContext()[Job]
+    val handle = job?.invokeOnCompletion { call.cancel() }
+    try {
+      // IMPORTANT: execute() is blocking and must stay off the main thread (the caller is on
+      // Dispatchers.IO); Android throws NetworkOnMainThreadException otherwise.
+      call.execute().use { response ->
+        if (!response.isSuccessful) throw GeminiHttp.errorFrom(response)
+        val source = response.body?.source() ?: throw GeminiException(GeminiErrorKind.EMPTY)
+        val text = StringBuilder()
+        var blocked = false
+        while (true) {
+          val line = source.readUtf8Line() ?: break
+          if (!line.startsWith("data:")) continue
+          val chunk = runCatching { JSONObject(line.removePrefix("data:").trim()) }.getOrNull() ?: continue
+          chunk.optJSONObject("error")?.let { throw GeminiHttp.errorFrom(it) }
+          if (chunk.optJSONObject("promptFeedback")?.has("blockReason") == true) blocked = true
+          val candidate = chunk.optJSONArray("candidates")?.optJSONObject(0) ?: continue
+          if (candidate.optString("finishReason") in BLOCKED_REASONS) blocked = true
+          val parts = candidate.optJSONObject("content")?.optJSONArray("parts") ?: continue
+          var grew = false
+          for (i in 0 until parts.length()) {
+            val part = parts.getJSONObject(i)
+            if (part.optBoolean("thought")) continue // reasoning summary, not the answer
+            val piece = part.optString("text")
+            if (piece.isNotEmpty()) {
+              text.append(piece)
+              grew = true
+            }
           }
-        )
-      }
-
-      val httpRequest = Request.Builder()
-        .url(url)
-        .post(body.toString().toRequestBody(jsonMediaType))
-        .build()
-
-      // IMPORTANT: this is a blocking OkHttp call (execute(), not enqueue()). It must run off
-      // the main thread — Android throws NetworkOnMainThreadException otherwise, and that
-      // exception's message is null, which used to surface to the user as a bare "unknown
-      // error" with no clue what actually went wrong. Hence withContext(Dispatchers.IO) above.
-      val responseText = client.newCall(httpRequest).execute().use { response ->
-        val raw = response.body?.string().orEmpty()
-        if (!response.isSuccessful) {
-          val apiMessage = runCatching {
-            JSONObject(raw).optJSONObject("error")?.optString("message")
-          }.getOrNull()
-          throw IOException("Erreur Gemini (${response.code}) : ${apiMessage ?: raw.take(200)}")
+          if (grew) onPartial(text.toString())
         }
-        raw
+        val result = text.toString().trim()
+        if (result.isEmpty()) {
+          throw GeminiException(if (blocked) GeminiErrorKind.BLOCKED else GeminiErrorKind.EMPTY)
+        }
+        return result
       }
-
-      parseGeneratedText(responseText)
-        ?: throw IllegalStateException("Réponse vide de Gemini.")
+    } finally {
+      handle?.dispose()
     }
   }
 
-  private fun parseGeneratedText(raw: String): String? {
-    val json = JSONObject(raw)
-    val candidates = json.optJSONArray("candidates") ?: return null
-    if (candidates.length() == 0) return null
-    val content = candidates.getJSONObject(0).optJSONObject("content") ?: return null
-    val parts = content.optJSONArray("parts") ?: return null
-    val builder = StringBuilder()
-    for (i in 0 until parts.length()) {
-      builder.append(parts.getJSONObject(i).optString("text"))
-    }
-    return builder.toString().trim().takeUnless { it.isEmpty() }
+  private companion object {
+    const val MODEL = "gemini-3.6-flash"
+    val BLOCKED_REASONS = setOf("SAFETY", "PROHIBITED_CONTENT", "BLOCKLIST", "SPII", "RECITATION")
   }
 
   private fun buildPrompt(request: GenerationRequest): String {
     val (level, grammarPoint, theme) = Triple(request.level, request.grammarPointTitle, request.theme)
+    val a = request.voices.first.name
+    val b = request.voices.second.name
 
     return when (request.format) {
       GenerationFormat.TEXT -> """
@@ -136,13 +180,13 @@ class GeminiGenerationRepository {
 
       GenerationFormat.PODCAST_SCRIPT -> """
         Tu es scénariste pour un podcast pédagogique de FLE (français langue étrangère).
-        Écris le script d'un podcast à deux voix (Camille et Nadia) d'environ 950 à 1100 mots
+        Écris le script d'un podcast à deux voix ($a et $b) d'environ 950 à 1100 mots
         (soit environ 7 à 8 minutes à l'oral), en français, calibré pour le niveau CECRL $level.
         Thème imposé : "$theme".
         Contrainte grammaticale : les deux voix doivent employer plusieurs fois, de façon naturelle
         et variée, la règle suivante : "$grammarPoint".
         Format de sortie :
-        - Indique le nom du locuteur avant chaque réplique (ex. "Camille :", "Nadia :").
+        - Indique le nom du locuteur avant chaque réplique (ex. "$a :", "$b :").
         - Ton conversationnel, quelques hésitations naturelles, mais sans argot excessif si le niveau est bas.
         - Termine par une ligne "---" suivie de 3 puces expliquant où la règle grammaticale apparaît.
         Réponds uniquement avec ce script, sans introduction ni conclusion méta.
