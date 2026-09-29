@@ -58,7 +58,6 @@ class GeminiTtsRepository {
     private const val BITS_PER_SAMPLE = 16
     private const val PARALLEL_REQUESTS = 2
     private const val GAP_BETWEEN_CHUNKS_MS = 300
-    private val VOICES = listOf("Kore", "Puck")
   }
 
   /** A synthesized podcast: the WAV file content and when each turn and word is spoken. */
@@ -72,6 +71,7 @@ class GeminiTtsRepository {
    */
   suspend fun synthesizePodcast(
     script: String,
+    voices: PodcastVoices,
     apiKey: String,
     onProgress: (done: Int, total: Int) -> Unit = { _, _ -> },
     onRetry: (attempt: Int, maxAttempts: Int) -> Unit = { _, _ -> }
@@ -80,7 +80,7 @@ class GeminiTtsRepository {
       if (apiKey.isBlank()) throw GeminiException(GeminiErrorKind.INVALID_KEY)
       val turns = DialogueScript.parse(script)
       if (turns.isEmpty()) throw GeminiException(GeminiErrorKind.EMPTY, detail = "No dialogue lines found")
-      val speakers = turns.map { it.speaker }.distinct().take(2)
+      val speakers = assignVoices(turns.map { it.speaker }.distinct().take(2), voices)
       val chunks = DialogueScript.chunk(turns)
       val done = AtomicInteger(0)
       onProgress(0, chunks.size)
@@ -113,7 +113,22 @@ class GeminiTtsRepository {
   }
 
   /** One TTS request for a few turns; returns raw PCM and its sample rate. */
-  private suspend fun requestChunk(chunk: List<DialogueTurn>, speakers: List<String>, apiKey: String): Pair<ByteArray, Int> {
+  /**
+   * Gives each speaker of the script its voice: by name when the script uses the expected names,
+   * otherwise in order of appearance.
+   */
+  private fun assignVoices(names: List<String>, voices: PodcastVoices): List<PodcastSpeaker> {
+    val byName = voices.speakers.associateBy { it.name.lowercase() }
+    val unused = voices.speakers.filter { it.name.lowercase() !in names.map(String::lowercase) }.toMutableList()
+    val assigned = names.map { name ->
+      byName[name.lowercase()]?.let { PodcastSpeaker(name, it.voice) }
+        ?: PodcastSpeaker(name, unused.removeAt(0).voice)
+    }
+    // Multi-speaker TTS needs exactly two voices, even if the script only has one speaker.
+    return (assigned + unused).take(2)
+  }
+
+  private suspend fun requestChunk(chunk: List<DialogueTurn>, speakers: List<PodcastSpeaker>, apiKey: String): Pair<ByteArray, Int> {
     val url = "https://generativelanguage.googleapis.com/v1beta/models/$MODEL:generateContent?key=$apiKey"
     val dialogue = chunk.joinToString("\n") { "${it.speaker}: ${it.text}" }
     val promptText =
@@ -121,9 +136,7 @@ class GeminiTtsRepository {
         "distinctes pour les deux locuteurs :\n\n$dialogue"
 
     val voiceConfigs = JSONArray()
-    // Multi-speaker TTS needs exactly two voices, even if this chunk only has one speaker.
-    val names = (speakers + listOf("Camille", "Nadia")).distinct().take(2)
-    names.forEachIndexed { i, name -> voiceConfigs.put(speakerVoiceConfig(name, VOICES[i])) }
+    speakers.forEach { voiceConfigs.put(speakerVoiceConfig(it.name, it.voice)) }
 
     val body = JSONObject().apply {
       put(

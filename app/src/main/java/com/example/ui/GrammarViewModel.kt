@@ -17,6 +17,7 @@ import com.example.data.engine.ForceLayout
 import com.example.data.engine.GeminiErrorKind
 import com.example.data.engine.GeminiHttp
 import com.example.data.engine.PodcastTimeline
+import com.example.data.engine.PodcastVoices
 import com.example.data.engine.GrammarMapBuilder
 import com.example.data.engine.MapGraph
 import com.example.data.engine.GeminiGenerationRepository
@@ -303,9 +304,18 @@ class GrammarViewModel(application: Application) : AndroidViewModel(application)
   // --- GENERATION ---
 
   private val _generationForm = MutableStateFlow(
-    GenerationForm(ruleId = _exploreRuleId.value, level = ruleById(_exploreRuleId.value).level)
+    GenerationForm(
+      ruleId = _exploreRuleId.value,
+      level = ruleById(_exploreRuleId.value).level,
+      voices = prefs.podcastVoices
+    )
   )
   val generationForm: StateFlow<GenerationForm> = _generationForm.asStateFlow()
+
+  fun setPodcastVoices(voices: PodcastVoices) {
+    prefs.podcastVoices = voices
+    _generationForm.update { it.copy(voices = voices) }
+  }
 
   fun updateGenerationForm(transform: (GenerationForm) -> GenerationForm) {
     _generationForm.update(transform)
@@ -366,7 +376,8 @@ class GrammarViewModel(application: Application) : AndroidViewModel(application)
       format = form.format,
       level = form.level,
       grammarPointTitle = rule.titleFr,
-      theme = theme
+      theme = theme,
+      voices = form.voices
     )
     generationJob = viewModelScope.launch {
       generationRepository.generate(
@@ -374,7 +385,8 @@ class GrammarViewModel(application: Application) : AndroidViewModel(application)
           level = form.level,
           grammarPointTitle = rule.titleFr,
           theme = theme,
-          format = form.format
+          format = form.format,
+          voices = form.voices
         ),
         apiKey = apiKey,
         // Text shows up on screen as it streams in.
@@ -518,6 +530,7 @@ class GrammarViewModel(application: Application) : AndroidViewModel(application)
     audioJob = viewModelScope.launch {
       ttsRepository.synthesizePodcast(
         script = script,
+        voices = _generationState.value.voices,
         apiKey = apiKey,
         onProgress = { done, total ->
           _generationState.update { it.copy(audioProgress = done to total, statusMessage = null) }

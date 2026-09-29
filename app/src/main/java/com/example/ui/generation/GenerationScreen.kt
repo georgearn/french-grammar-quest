@@ -92,6 +92,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.example.R
 import com.example.data.engine.GenerationFormat
 import com.example.data.engine.PodcastTimeline
+import com.example.data.engine.PodcastVoices
 import com.example.util.SpokenRange
 import com.example.ui.GrammarViewModel
 import com.example.ui.components.CEFR_LEVELS
@@ -107,6 +108,7 @@ data class GenerationForm(
   val level: String,
   val theme: String = "",
   val format: GenerationFormat = GenerationFormat.TEXT,
+  val voices: PodcastVoices = PodcastVoices.TWO_WOMEN,
   /** True while the rule simply mirrors the one open in "Comprendre". */
   val followsExplore: Boolean = true
 )
@@ -123,6 +125,8 @@ data class GenerationUiState(
   val grammarPointTitle: String? = null,
   val theme: String? = null,
   val isSaved: Boolean = false,
+  /** Speakers of the generated podcast script; the audio must use the same ones. */
+  val voices: PodcastVoices = PodcastVoices.TWO_WOMEN,
   /** Shown while Gemini is being retried ("servers busy, retrying 2/3"). */
   val statusMessage: String? = null,
   /** Podcast audio chunks done / total while synthesizing. */
@@ -222,6 +226,10 @@ fun GenerationScreen(
 
       FieldLabel(stringResource(R.string.gen_format))
       FormatSelector(format = form.format, onSelect = { f -> viewModel.updateGenerationForm { it.copy(format = f) } })
+      if (form.format == GenerationFormat.PODCAST_SCRIPT) {
+        FieldLabel(stringResource(R.string.gen_voices))
+        VoicesSelector(voices = form.voices, onSelect = viewModel::setPodcastVoices)
+      }
 
       Spacer(Modifier.height(4.dp))
       if (apiKey.isBlank()) {
@@ -432,6 +440,30 @@ private fun FormatSelector(format: GenerationFormat, onSelect: (GenerationFormat
   }
   Text(
     stringResource(if (format == GenerationFormat.TEXT) R.string.gen_format_text_desc else R.string.gen_format_podcast_desc),
+    style = MaterialTheme.typography.bodySmall,
+    color = MaterialTheme.colorScheme.onSurfaceVariant
+  )
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun VoicesSelector(voices: PodcastVoices, onSelect: (PodcastVoices) -> Unit) {
+  val options = listOf(
+    PodcastVoices.TWO_WOMEN to R.string.gen_voices_two_women,
+    PodcastVoices.TWO_MEN to R.string.gen_voices_two_men,
+    PodcastVoices.WOMAN_AND_MAN to R.string.gen_voices_mixed
+  )
+  SingleChoiceSegmentedButtonRow(modifier = Modifier.fillMaxWidth()) {
+    options.forEachIndexed { index, (option, label) ->
+      SegmentedButton(
+        selected = voices == option,
+        onClick = { onSelect(option) },
+        shape = SegmentedButtonDefaults.itemShape(index, options.size)
+      ) { Text(stringResource(label), maxLines = 1) }
+    }
+  }
+  Text(
+    "${voices.first.name} & ${voices.second.name}",
     style = MaterialTheme.typography.bodySmall,
     color = MaterialTheme.colorScheme.onSurfaceVariant
   )

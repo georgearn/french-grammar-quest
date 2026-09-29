@@ -17,11 +17,28 @@ enum class GenerationFormat {
   PODCAST_SCRIPT  // Script de "podcast" à deux voix, lu ensuite via la synthèse vocale de l'appareil
 }
 
+/** A podcast speaker: the name used in the script and the Gemini TTS voice that reads it. */
+data class PodcastSpeaker(val name: String, val voice: String)
+
+/**
+ * Who speaks in a podcast. Kore + Puck is the original pairing, heard as two women. Gemini does
+ * not label its prebuilt voices by gender; the men's voices below were picked by ear and can be
+ * swapped here without touching anything else.
+ */
+enum class PodcastVoices(val first: PodcastSpeaker, val second: PodcastSpeaker) {
+  TWO_WOMEN(PodcastSpeaker("Camille", "Kore"), PodcastSpeaker("Nadia", "Puck")),
+  TWO_MEN(PodcastSpeaker("Julien", "Charon"), PodcastSpeaker("Karim", "Orus")),
+  WOMAN_AND_MAN(PodcastSpeaker("Camille", "Kore"), PodcastSpeaker("Julien", "Charon"));
+
+  val speakers: List<PodcastSpeaker> get() = listOf(first, second)
+}
+
 data class GenerationRequest(
   val level: String,
   val grammarPointTitle: String,
   val theme: String,
-  val format: GenerationFormat
+  val format: GenerationFormat,
+  val voices: PodcastVoices = PodcastVoices.TWO_WOMEN
 )
 
 /**
@@ -144,6 +161,8 @@ class GeminiGenerationRepository {
 
   private fun buildPrompt(request: GenerationRequest): String {
     val (level, grammarPoint, theme) = Triple(request.level, request.grammarPointTitle, request.theme)
+    val a = request.voices.first.name
+    val b = request.voices.second.name
 
     return when (request.format) {
       GenerationFormat.TEXT -> """
@@ -161,13 +180,13 @@ class GeminiGenerationRepository {
 
       GenerationFormat.PODCAST_SCRIPT -> """
         Tu es scénariste pour un podcast pédagogique de FLE (français langue étrangère).
-        Écris le script d'un podcast à deux voix (Camille et Nadia) d'environ 950 à 1100 mots
+        Écris le script d'un podcast à deux voix ($a et $b) d'environ 950 à 1100 mots
         (soit environ 7 à 8 minutes à l'oral), en français, calibré pour le niveau CECRL $level.
         Thème imposé : "$theme".
         Contrainte grammaticale : les deux voix doivent employer plusieurs fois, de façon naturelle
         et variée, la règle suivante : "$grammarPoint".
         Format de sortie :
-        - Indique le nom du locuteur avant chaque réplique (ex. "Camille :", "Nadia :").
+        - Indique le nom du locuteur avant chaque réplique (ex. "$a :", "$b :").
         - Ton conversationnel, quelques hésitations naturelles, mais sans argot excessif si le niveau est bas.
         - Termine par une ligne "---" suivie de 3 puces expliquant où la règle grammaticale apparaît.
         Réponds uniquement avec ce script, sans introduction ni conclusion méta.

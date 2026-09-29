@@ -196,6 +196,11 @@
     <string name="gen_error_blocked">Gemini a refusé de générer ce contenu. Essaie un autre thème.</string>
     <string name="gen_error_empty">Gemini n’a rien renvoyé. Réessaie.</string>
 
+    <string name="gen_voices">Voix</string>
+    <string name="gen_voices_two_women">2 femmes</string>
+    <string name="gen_voices_two_men">2 hommes</string>
+    <string name="gen_voices_mixed">Femme et homme</string>
+
     <!-- Grammar map -->
     <string name="map_view_map">Carte</string>
     <string name="map_view_list">Liste</string>
