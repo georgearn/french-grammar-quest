@@ -14,6 +14,9 @@ import com.example.data.GrammarRepository
 import com.example.data.engine.AnswerChecker
 import com.example.data.engine.AnswerVerdict
 import com.example.data.engine.ForceLayout
+import com.example.data.engine.GeminiErrorKind
+import com.example.data.engine.GeminiHttp
+import com.example.data.engine.PodcastTimeline
 import com.example.data.engine.GrammarMapBuilder
 import com.example.data.engine.MapGraph
 import com.example.data.engine.GeminiGenerationRepository
@@ -29,12 +32,17 @@ import com.example.data.prefs.DrillMode
 import com.example.data.prefs.StartMode
 import com.example.ui.generation.GenerationForm
 import com.example.ui.generation.GenerationUiState
+import com.example.ui.generation.PlaybackState
 import com.example.ui.generation.SavedGenerationUi
 import com.example.ui.i18n.AppLanguage
 import com.example.ui.navigation.Routes
 import com.example.ui.theme.ThemeMode
 import com.example.util.FrenchAudioHelper
+import com.example.util.SpokenRange
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.collectLatest
@@ -339,6 +347,8 @@ class GrammarViewModel(application: Application) : AndroidViewModel(application)
       initialValue = emptyList()
     )
 
+  private var generationJob: Job? = null
+
   fun generateContent() {
     val form = _generationForm.value
     val rule = ruleById(form.ruleId)
@@ -349,6 +359,8 @@ class GrammarViewModel(application: Application) : AndroidViewModel(application)
     }
     val theme = form.theme.trim().ifBlank { string(R.string.gen_default_theme) }
     stopPodcastAudio()
+    generationJob?.cancel()
+    audioJob?.cancel()
     _generationState.value = GenerationUiState(
       isLoading = true,
       format = form.format,
@@ -356,7 +368,7 @@ class GrammarViewModel(application: Application) : AndroidViewModel(application)
       grammarPointTitle = rule.titleFr,
       theme = theme
     )
-    viewModelScope.launch {
+    generationJob = viewModelScope.launch {
       generationRepository.generate(
         GenerationRequest(
           level = form.level,
@@ -364,16 +376,28 @@ class GrammarViewModel(application: Application) : AndroidViewModel(application)
           theme = theme,
           format = form.format
         ),
-        apiKey = apiKey
+        apiKey = apiKey,
+        // Text shows up on screen as it streams in.
+        onPartial = { partial -> _generationState.update { it.copy(resultText = partial, statusMessage = null) } },
+        onRetry = { attempt, max ->
+          _generationState.update {
+            it.copy(resultText = null, statusMessage = string(R.string.gen_retrying, attempt, max))
+          }
+        }
       ).onSuccess { text ->
-        _generationState.update { it.copy(isLoading = false, resultText = text, isSaved = false) }
+        _generationState.update { it.copy(isLoading = false, resultText = text, statusMessage = null, isSaved = false) }
       }.onFailure { err ->
-        _generationState.update { it.copy(isLoading = false, error = errorMessage(err)) }
+        if (err is CancellationException) return@onFailure
+        _generationState.update {
+          it.copy(isLoading = false, resultText = null, statusMessage = null, error = errorMessage(err))
+        }
       }
     }
   }
 
   fun dismissGeneration() {
+    generationJob?.cancel()
+    audioJob?.cancel()
     stopPodcastAudio()
     _generationState.value = GenerationUiState()
   }
@@ -396,9 +420,12 @@ class GrammarViewModel(application: Application) : AndroidViewModel(application)
       val persistedAudioPath = state.podcastAudioPath?.let { cachePath ->
         withContext(Dispatchers.IO) {
           runCatching {
+            val filesDir = getApplication<Application>().filesDir
             val cacheFile = File(cachePath)
-            val destFile = File(getApplication<Application>().filesDir, cacheFile.name)
+            val destFile = File(filesDir, cacheFile.name)
             cacheFile.copyTo(destFile, overwrite = true)
+            timelineFile(cachePath).takeIf { it.exists() }
+              ?.copyTo(timelineFile(destFile.absolutePath), overwrite = true)
             destFile.absolutePath
           }.getOrNull()
         }
@@ -416,8 +443,16 @@ class GrammarViewModel(application: Application) : AndroidViewModel(application)
   }
 
   fun deleteSavedGeneration(id: Long) {
+    val audioPath = savedGenerations.value.firstOrNull { it.id == id }?.audioPath
+    if (audioPath != null && audioPath == _playback.value.path) stopPodcastAudio()
     viewModelScope.launch {
       repository.deleteSavedGeneration(id)
+      audioPath?.let { path ->
+        withContext(Dispatchers.IO) {
+          File(path).delete()
+          timelineFile(path).delete()
+        }
+      }
     }
   }
 
@@ -456,32 +491,16 @@ class GrammarViewModel(application: Application) : AndroidViewModel(application)
     }
   }
 
-  private val _isPodcastPlaying = MutableStateFlow(false)
-  val isPodcastPlaying: StateFlow<Boolean> = _isPodcastPlaying.asStateFlow()
-
-  // Path of the saved-generation audio currently playing (distinct from the just-generated
-  // podcast's own audio, which uses podcastAudioPath/isPodcastPlaying above).
-  private val _playingSavedAudioPath = MutableStateFlow<String?>(null)
-  val playingSavedAudioPath: StateFlow<String?> = _playingSavedAudioPath.asStateFlow()
-
-  /** Plays back audio belonging to a saved generation (separate from the just-generated podcast). */
-  fun playSavedAudio(path: String) {
-    stopPodcastAudio()
-    runCatching {
-      podcastPlayer = MediaPlayer().apply {
-        setDataSource(path)
-        setOnCompletionListener { _playingSavedAudioPath.value = null }
-        prepare()
-        start()
-      }
-      _playingSavedAudioPath.value = path
-    }
-  }
+  private val _playback = MutableStateFlow(PlaybackState())
+  /** The podcast audio currently loaded in the player (just generated or saved). */
+  val playback: StateFlow<PlaybackState> = _playback.asStateFlow()
+  private var positionTicker: Job? = null
+  private var audioJob: Job? = null
 
   /**
    * Synthesizes a podcast script into real spoken audio via Gemini's TTS models (two distinct
-   * voices), replacing the flat single-voice device TTS readback. Writes the result as a WAV
-   * file into the app's cache dir and exposes its path for playback.
+   * voices), in chunks, with a timeline of when each word is spoken. Writes the WAV and its
+   * timeline (same name, .json) into the app's cache dir.
    */
   fun synthesizePodcastAudio(script: String) {
     val apiKey = _geminiApiKey.value
@@ -492,50 +511,132 @@ class GrammarViewModel(application: Application) : AndroidViewModel(application)
       return
     }
     stopPodcastAudio()
+    audioJob?.cancel()
     _generationState.update {
-      it.copy(isSynthesizingAudio = true, audioError = null, podcastAudioPath = null)
+      it.copy(isSynthesizingAudio = true, audioError = null, podcastAudioPath = null, podcastTimeline = null, audioProgress = null)
     }
-    viewModelScope.launch {
-      ttsRepository.synthesizeDialogue(
+    audioJob = viewModelScope.launch {
+      ttsRepository.synthesizePodcast(
         script = script,
-        speaker1 = "Camille",
-        speaker2 = "Nadia",
-        apiKey = apiKey
-      ).onSuccess { wavBytes ->
+        apiKey = apiKey,
+        onProgress = { done, total ->
+          _generationState.update { it.copy(audioProgress = done to total, statusMessage = null) }
+        },
+        onRetry = { attempt, max ->
+          _generationState.update { it.copy(statusMessage = string(R.string.gen_retrying, attempt, max)) }
+        }
+      ).onSuccess { audio ->
         val file = withContext(Dispatchers.IO) {
-          File(getApplication<Application>().cacheDir, "podcast_${System.currentTimeMillis()}.wav")
-            .also { it.writeBytes(wavBytes) }
+          val wav = File(getApplication<Application>().cacheDir, "podcast_${System.currentTimeMillis()}.wav")
+          wav.writeBytes(audio.wav)
+          timelineFile(wav.absolutePath).writeText(audio.timeline.toJson())
+          wav
         }
         _generationState.update {
-          it.copy(isSynthesizingAudio = false, podcastAudioPath = file.absolutePath)
+          it.copy(
+            isSynthesizingAudio = false,
+            podcastAudioPath = file.absolutePath,
+            podcastTimeline = audio.timeline,
+            audioProgress = null,
+            statusMessage = null
+          )
         }
       }.onFailure { err ->
-        _generationState.update { it.copy(isSynthesizingAudio = false, audioError = errorMessage(err)) }
+        if (err is CancellationException) return@onFailure
+        _generationState.update {
+          it.copy(isSynthesizingAudio = false, audioProgress = null, statusMessage = null, audioError = errorMessage(err))
+        }
       }
     }
   }
 
-  fun playPodcastAudio(path: String) {
+  /** Timeline stored next to a podcast WAV, if it was synthesized with one. */
+  suspend fun timelineFor(audioPath: String): PodcastTimeline? = withContext(Dispatchers.IO) {
+    timelineFile(audioPath).takeIf { it.exists() }?.let { PodcastTimeline.fromJson(it.readText()) }
+  }
+
+  private fun timelineFile(audioPath: String): File {
+    val audio = File(audioPath)
+    return File(audio.parentFile, audio.nameWithoutExtension + ".json")
+  }
+
+  /** Plays or pauses [path]; another file already loaded is stopped first. */
+  fun togglePlayback(path: String) {
+    val player = podcastPlayer
+    if (_playback.value.path == path && player != null) {
+      if (player.isPlaying) {
+        player.pause()
+        positionTicker?.cancel()
+        _playback.update { it.copy(isPlaying = false) }
+      } else {
+        player.start()
+        _playback.update { it.copy(isPlaying = true) }
+        startPositionTicker()
+      }
+      return
+    }
+    startPlayback(path, fromMs = 0)
+  }
+
+  /** Jumps to [positionMs] in [path], starting playback if needed (tapping a line of the script). */
+  fun seekPlayback(path: String, positionMs: Long) {
+    val player = podcastPlayer
+    if (_playback.value.path == path && player != null) {
+      player.seekTo(positionMs.toInt())
+      if (!player.isPlaying) player.start()
+      _playback.update { it.copy(isPlaying = true, positionMs = positionMs) }
+      startPositionTicker()
+    } else {
+      startPlayback(path, fromMs = positionMs)
+    }
+  }
+
+  private fun startPlayback(path: String, fromMs: Long) {
     stopPodcastAudio()
+    stopAudio()
     runCatching {
-      podcastPlayer = MediaPlayer().apply {
+      val player = MediaPlayer().apply {
         setDataSource(path)
-        setOnCompletionListener { _isPodcastPlaying.value = false }
+        setOnCompletionListener {
+          positionTicker?.cancel()
+          _playback.update { it.copy(isPlaying = false, positionMs = 0) }
+        }
         prepare()
+        if (fromMs > 0) seekTo(fromMs.toInt())
         start()
       }
-      _isPodcastPlaying.value = true
+      podcastPlayer = player
+      _playback.value = PlaybackState(
+        path = path,
+        isPlaying = true,
+        positionMs = fromMs,
+        durationMs = player.duration.toLong()
+      )
+      startPositionTicker()
+    }
+  }
+
+  /** Publishes the playback position about 20 times a second, for the word highlight. */
+  private fun startPositionTicker() {
+    positionTicker?.cancel()
+    positionTicker = viewModelScope.launch {
+      while (true) {
+        val player = podcastPlayer ?: break
+        val position = runCatching { player.currentPosition.toLong() }.getOrNull() ?: break
+        _playback.update { it.copy(positionMs = position) }
+        delay(50)
+      }
     }
   }
 
   fun stopPodcastAudio() {
+    positionTicker?.cancel()
     podcastPlayer?.let {
       runCatching { if (it.isPlaying) it.stop() }
       it.release()
     }
     podcastPlayer = null
-    _isPodcastPlaying.value = false
-    _playingSavedAudioPath.value = null
+    _playback.value = PlaybackState()
   }
 
   // --- GRAMMAR MAP ---
@@ -633,7 +734,11 @@ class GrammarViewModel(application: Application) : AndroidViewModel(application)
 
   val isSpeaking: StateFlow<Boolean> = audioHelper.isSpeaking
 
+  /** Word the device voice is saying, for highlighting in the text being read. */
+  val spokenRange: StateFlow<SpokenRange?> = audioHelper.spokenRange
+
   fun speakFrench(text: String) {
+    stopPodcastAudio()
     audioHelper.speak(text)
   }
 
@@ -650,11 +755,26 @@ class GrammarViewModel(application: Application) : AndroidViewModel(application)
     return app.createConfigurationContext(config).resources.getString(id, *args)
   }
 
-  // Some exceptions (e.g. Android's NetworkOnMainThreadException) carry a null message; fall back
-  // to the exception's class name so there's always something actionable on screen.
-  private fun errorMessage(err: Throwable): String =
-    err.message?.takeIf { it.isNotBlank() }
-      ?: string(R.string.error_unexpected, err::class.simpleName ?: "?")
+  /** A message the learner can act on, instead of a raw "503 UNAVAILABLE". */
+  private fun errorMessage(err: Throwable): String {
+    val error = GeminiHttp.classify(err)
+    return when (error.kind) {
+      GeminiErrorKind.OVERLOADED -> string(R.string.gen_error_overloaded)
+      GeminiErrorKind.RATE_LIMITED -> string(R.string.gen_error_rate_limited)
+      GeminiErrorKind.DAILY_QUOTA -> string(R.string.gen_error_daily_quota)
+      GeminiErrorKind.INVALID_KEY -> string(R.string.gen_error_invalid_key)
+      GeminiErrorKind.MODEL_UNAVAILABLE -> string(R.string.gen_error_model)
+      GeminiErrorKind.SERVER -> string(R.string.gen_error_server, error.httpCode ?: 500)
+      GeminiErrorKind.TIMEOUT -> string(R.string.gen_error_timeout)
+      GeminiErrorKind.NETWORK -> string(R.string.gen_error_network)
+      GeminiErrorKind.BLOCKED -> string(R.string.gen_error_blocked)
+      GeminiErrorKind.EMPTY -> string(R.string.gen_error_empty)
+      // Some exceptions carry a null message; fall back to the class name so there is always
+      // something to report.
+      GeminiErrorKind.OTHER -> error.detail?.takeIf { it.isNotBlank() }
+        ?: string(R.string.error_unexpected, err::class.simpleName ?: "?")
+    }
+  }
 
   override fun onCleared() {
     super.onCleared()

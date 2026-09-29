@@ -182,6 +182,20 @@
     <!-- Index -->
     <string name="index_count">%1$d règle(s)</string>
     <string name="index_progress">Saisie %1$d/%2$d · Détection %3$d/%4$d</string>
+    <string name="action_pause">Pause</string>
+    <string name="gen_retrying">Serveurs de Gemini très sollicités. Nouvel essai (%1$d/%2$d)…</string>
+    <string name="gen_audio_progress">Création des voix… partie %1$d sur %2$d</string>
+    <string name="gen_error_overloaded">Les serveurs de Gemini sont très sollicités en ce moment. Ce n’est pas un problème de l’application : réessaie dans quelques instants.</string>
+    <string name="gen_error_rate_limited">Ta clé a atteint sa limite de requêtes par minute. Patiente une minute, puis réessaie.</string>
+    <string name="gen_error_daily_quota">Ta clé a atteint son quota du jour. Réessaie demain ou utilise une autre clé.</string>
+    <string name="gen_error_invalid_key">Gemini refuse la clé API. Vérifie-la dans les Réglages.</string>
+    <string name="gen_error_model">Ce modèle Gemini n’est plus disponible. Mets l’application à jour.</string>
+    <string name="gen_error_server">Erreur du serveur Gemini (%1$d). Réessaie dans quelques instants.</string>
+    <string name="gen_error_timeout">Gemini a mis trop de temps à répondre. Réessaie.</string>
+    <string name="gen_error_network">Pas de connexion à internet. Vérifie ta connexion, puis réessaie.</string>
+    <string name="gen_error_blocked">Gemini a refusé de générer ce contenu. Essaie un autre thème.</string>
+    <string name="gen_error_empty">Gemini n’a rien renvoyé. Réessaie.</string>
+
     <!-- Grammar map -->
     <string name="map_view_map">Carte</string>
     <string name="map_view_list">Liste</string>
